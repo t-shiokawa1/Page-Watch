@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PAGEWATCH_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-PAGEWATCH_UI_URL="${PAGEWATCH_UI_URL:-https://t-shiokawa1.github.io/pagewatch/}"
+PAGEWATCH_UI_URL="${PAGEWATCH_UI_URL:-https://t-shiokawa1.github.io/Page-Watch/}"
 cd "$PAGEWATCH_DIR"
 
 # The Pages UI (PAGEWATCH_UI_URL) only needs the Python API below, which uses

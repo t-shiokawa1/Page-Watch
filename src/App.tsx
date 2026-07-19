@@ -43,7 +43,7 @@ const statusLabels: Record<string, { label: string; tone: string }> = {
 
 const SOURCE_KEY = "pagewatch-source";
 const ADMIN_KEY = "pagewatch-admin";
-const DOWNLOAD_URL = "https://github.com/t-shiokawa1/pagewatch/archive/refs/heads/main.zip";
+const DOWNLOAD_URL = "https://github.com/t-shiokawa1/Page-Watch/archive/refs/heads/main.zip";
 const TOKEN_URL = "https://github.com/settings/personal-access-tokens/new";
 
 // Cloud mode writes to the owner's private data repo, so only the owner can use
@@ -300,7 +300,7 @@ function App() {
             </p>
             <ol>
               <li>下のボタンからアプリ一式（ZIP）をダウンロードします。</li>
-              <li>ダウンロードした <code>pagewatch-main.zip</code> をダブルクリックして展開します。</li>
+              <li>ダウンロードした <code>Page-Watch-main.zip</code> をダブルクリックして展開します。</li>
               <li>できたフォルダの中の <code>start.command</code> をダブルクリックします。</li>
               <li>
                 <strong>「"start.command" is not opened / 開けませんでした」と出た場合</strong>（初回のみ）：
