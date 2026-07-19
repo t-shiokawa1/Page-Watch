@@ -70,6 +70,10 @@ main { max-width: 1500px; margin: 0 auto; padding: 0 clamp(22px, 5vw, 78px) 24px
 .setup-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
 .setup-button { display: inline-flex; align-items: center; height: 44px; padding: 0 20px; background: var(--ink); color: var(--white); font-weight: 600; font-size: 13px; text-decoration: none; border: 1px solid var(--ink); transition: .2s; }
 .setup-button:hover { background: var(--orange); border-color: var(--orange); transform: translateY(-2px); }
+.setup-alt { margin-top: 2px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; }
+.setup-alt summary { cursor: pointer; font-weight: 600; color: var(--ink); }
+.setup-alt p { margin: 8px 0 0; line-height: 1.7; max-width: 760px; }
+.setup-alt code { background: var(--cream); padding: 1px 6px; font-size: 11px; }
 .section-index { font: 500 12px ui-monospace, "SFMono-Regular", monospace; color: var(--orange); }
 .panel-heading { display: flex; justify-content: space-between; align-items: end; gap: 40px; margin-bottom: 16px; }
 .panel-heading h2, .section-title-row h2, .title-with-index h2, .dialog-heading h2 { margin: 0; font-size: clamp(22px, 2vw, 30px); line-height: 1; letter-spacing: -.04em; font-weight: 600; }

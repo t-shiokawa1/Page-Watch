@@ -277,13 +277,15 @@ function App() {
               まだ入っていない場合は、次の手順で始めてください（データはこのMacの外に出ません）。
             </p>
             <ol>
-              <li>
-                下のボタンからアプリ一式をダウンロードします。
-              </li>
+              <li>下のボタンからアプリ一式（ZIP）をダウンロードします。</li>
               <li>ダウンロードした <code>pagewatch-main.zip</code> をダブルクリックして展開します。</li>
+              <li>できたフォルダの中の <code>start.command</code> をダブルクリックします。</li>
               <li>
-                できたフォルダの中の <code>start.command</code> をダブルクリックします。
-                <small>「開けません」と出たら、右クリック →「開く」を選んでください（初回のみ）。</small>
+                <strong>「"start.command" is not opened / 開けませんでした」と出た場合</strong>（初回のみ）：
+                <small>① <strong>「ゴミ箱に入れる」は押さず</strong>「完了（Done）」を押す</small>
+                <small>② Appleメニュー →「システム設定」→「プライバシーとセキュリティ」を開く</small>
+                <small>③ 下の方の「このまま開く（Open Anyway）」を押し、Touch IDまたはパスワードで承認</small>
+                <small>④ もう一度 <code>start.command</code> をダブルクリック →「開く」</small>
               </li>
               <li>
                 この画面に戻り、下のボタンで再読み込みすると監視リストが表示されます。
@@ -296,6 +298,14 @@ function App() {
                 <span className={busy === "reload" ? "spin" : ""}>↻</span> 再読み込み
               </button>
             </div>
+            <details className="setup-alt">
+              <summary>うまくいかないとき（ターミナルで解除）</summary>
+              <p>
+                ターミナルを開き、次を入力して最後に半角スペースを打ち、展開したフォルダをウインドウにドラッグ＆ドロップしてEnter：
+              </p>
+              <p><code>xattr -dr com.apple.quarantine </code>（ここにフォルダをドラッグ）</p>
+              <p>その後 <code>start.command</code> をダブルクリックすれば開きます。</p>
+            </details>
           </section>
         )}
         {setupNeeded === "cloud-token" && (
