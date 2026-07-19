@@ -42,6 +42,8 @@ const statusLabels: Record<string, { label: string; tone: string }> = {
 };
 
 const SOURCE_KEY = "pagewatch-source";
+const DOWNLOAD_URL = "https://github.com/t-shiokawa1/pagewatch/archive/refs/heads/main.zip";
+const TOKEN_URL = "https://github.com/settings/personal-access-tokens/new";
 
 function defaultSource(): SourceKind {
   const saved = localStorage.getItem(SOURCE_KEY);
@@ -94,18 +96,22 @@ function App() {
   const cloudDialog = useRef<HTMLDialogElement>(null);
   const [settings, setSettings] = useState<Settings>(emptySettings);
   const [tokenDraft, setTokenDraft] = useState("");
+  const [hasToken, setHasToken] = useState(() => !!getCloudToken());
+  const [connError, setConnError] = useState(false);
 
   const loadState = useCallback(
     async (quiet = false) => {
       try {
         const next = await backend.loadState();
         setState(next);
+        setConnError(false);
         if (next.settings) {
           setSettings((current) =>
             settingsDialog.current?.open ? current : { ...next.settings!, smtp_password: "" },
           );
         }
       } catch (error) {
+        setConnError(true);
         if (!quiet) setMessage(error instanceof Error ? error.message : "接続できません");
       } finally {
         setLoading(false);
@@ -113,6 +119,14 @@ function App() {
     },
     [backend],
   );
+
+  // What the person needs to do before this mode can work.
+  const setupNeeded: "local-offline" | "cloud-token" | null =
+    backend.kind === "cloud" && !hasToken
+      ? "cloud-token"
+      : backend.kind === "local" && connError
+        ? "local-offline"
+        : null;
 
   useEffect(() => {
     setState(emptyState);
@@ -189,6 +203,7 @@ function App() {
   const saveToken = (event: FormEvent) => {
     event.preventDefault();
     setCloudToken(tokenDraft);
+    setHasToken(!!tokenDraft.trim());
     cloudDialog.current?.close();
     showMessage(tokenDraft ? "トークンを保存しました。" : "トークンを削除しました。");
     loadState();
@@ -253,6 +268,66 @@ function App() {
       </header>
 
       <main id="top">
+        {setupNeeded === "local-offline" && (
+          <section className="setup-card" aria-label="このMacで監視を始める手順">
+            <p className="eyebrow">はじめに / このMacで監視</p>
+            <h2>このMacの監視プログラムが起動していません</h2>
+            <p className="setup-lead">
+              「このMac」モードは、あなたのMac上で動く小さなプログラムが監視します。
+              まだ入っていない場合は、次の手順で始めてください（データはこのMacの外に出ません）。
+            </p>
+            <ol>
+              <li>
+                下のボタンからアプリ一式をダウンロードします。
+              </li>
+              <li>ダウンロードした <code>pagewatch-main.zip</code> をダブルクリックして展開します。</li>
+              <li>
+                できたフォルダの中の <code>start.command</code> をダブルクリックします。
+                <small>「開けません」と出たら、右クリック →「開く」を選んでください（初回のみ）。</small>
+              </li>
+              <li>
+                この画面に戻り、下のボタンで再読み込みすると監視リストが表示されます。
+                <small>macOS標準のPython3で動きます。起動に数十秒かかることがあります。</small>
+              </li>
+            </ol>
+            <div className="setup-actions">
+              <a className="setup-button" href={DOWNLOAD_URL}>アプリをダウンロード（ZIP）</a>
+              <button className="secondary-button" onClick={() => run("reload", () => loadState(), false)}>
+                <span className={busy === "reload" ? "spin" : ""}>↻</span> 再読み込み
+              </button>
+            </div>
+          </section>
+        )}
+        {setupNeeded === "cloud-token" && (
+          <section className="setup-card" aria-label="クラウドで監視を始める手順">
+            <p className="eyebrow">はじめに / クラウドで監視</p>
+            <h2>クラウド監視を使うには、最初に1回だけ設定が必要です</h2>
+            <p className="setup-lead">
+              「クラウド」モードは、Macを閉じていても監視を続けます。
+              あなたのGitHubアカウントで、専用の合言葉（トークン）を1つ作って貼り付けてください。
+            </p>
+            <ol>
+              <li>
+                下のボタンでGitHubのトークン作成画面を開きます。
+                <small>Repository access は <code>pagewatch-data</code> のみ、Permissions は Contents と Actions を「Read and write」に。</small>
+              </li>
+              <li>作成された文字列（<code>github_pat_…</code>）をコピーします。</li>
+              <li>「トークンを入力」ボタンから貼り付けて保存します。<small>このブラウザにだけ保存されます。</small></li>
+            </ol>
+            <div className="setup-actions">
+              <a className="setup-button" href={TOKEN_URL} target="_blank" rel="noreferrer">トークンを作成（GitHub）</a>
+              <button
+                className="secondary-button"
+                onClick={() => {
+                  setTokenDraft(getCloudToken());
+                  cloudDialog.current?.showModal();
+                }}
+              >
+                トークンを入力
+              </button>
+            </div>
+          </section>
+        )}
         <section className="add-panel add-panel-first" aria-labelledby="add-title">
           <div className="section-index">01</div>
           <div className="panel-heading">
