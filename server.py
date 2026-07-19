@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import difflib
 import hashlib
 from html.parser import HTMLParser
@@ -39,8 +40,12 @@ SETTINGS_PATH = DATA_DIR / "settings.json"
 LOG_PATH = DATA_DIR / "pagewatch.log"
 HOST = "127.0.0.1"
 PORT = 8765
-DEFAULT_ALLOWED_ORIGINS = {"https://t-shiokawa1.github.io"}
 USER_AGENT = "PageWatch/1.0 (local personal website monitor)"
+DEFAULT_ALLOWED_ORIGINS = {
+    "https://t-shiokawa1.github.io",
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+}
 MAX_PAGE_BYTES = 10 * 1024 * 1024
 CHECK_LOCK = threading.Lock()
 STOP_EVENT = threading.Event()
@@ -337,28 +342,84 @@ def fetch_site(site: sqlite3.Row) -> Tuple[str, Dict[str, str]]:
     except HTTPError as exc:
         if exc.code == HTTPStatus.NOT_MODIFIED:
             return "", {"not_modified": "1"}
-        raise RuntimeError(f"HTTP {exc.code}") from exc
+        raise RuntimeError(http_error_message(exc.code)) from exc
     except URLError as exc:
-        raise RuntimeError(str(exc.reason)) from exc
+        raise RuntimeError(f"接続できませんでした: {exc.reason}") from exc
+
+
+def http_error_message(code: int) -> str:
+    """Explain, in plain Japanese, why a fetch failed so the user knows what to do."""
+    if code in (401, 403):
+        return (
+            f"HTTP {code}: このサイトはボット対策で自動アクセスを拒否しています。"
+            "ブラウザ以外からの取得を許可していないため、PageWatchでは監視できません"
+            "（相手サイトの仕様で、設定を変えても回避できません）。"
+        )
+    if code == 404:
+        return f"HTTP {code}: ページが見つかりません。URLが正しいか確認してください。"
+    if code == 429:
+        return f"HTTP {code}: アクセス回数が多すぎて一時的に制限されています。確認間隔を長くしてください。"
+    if 500 <= code < 600:
+        return f"HTTP {code}: 相手サイト側で一時的な不具合が起きています。しばらく待って再確認してください。"
+    return f"HTTP {code}: ページを取得できませんでした。"
+
+
+def _net_changes(old_lines: List[str], new_lines: List[str]) -> Tuple[List[str], List[str]]:
+    """Return lines genuinely added / removed, ignoring pure reordering.
+
+    A line that merely moved position appears the same number of times in both
+    snapshots, so comparing per-line counts filters out that noise. Document
+    order is preserved for readability.
+    """
+    old_counts = Counter(old_lines)
+    new_counts = Counter(new_lines)
+
+    added: List[str] = []
+    seen: Counter = Counter()
+    for line in new_lines:
+        seen[line] += 1
+        if seen[line] > old_counts.get(line, 0):
+            added.append(line)
+
+    removed: List[str] = []
+    seen = Counter()
+    for line in old_lines:
+        seen[line] += 1
+        if seen[line] > new_counts.get(line, 0):
+            removed.append(line)
+    return added, removed
+
+
+def _format_change_group(label: str, items: List[str], limit: int = 6) -> str:
+    shown = items[:limit]
+    bullets = "\n".join(f"  ・{item[:180]}" for item in shown)
+    if len(items) > limit:
+        bullets += f"\n  …ほか{len(items) - limit}件"
+    return f"{label}（{len(items)}件）:\n{bullets}"
+
+
+def content_change(old: str, new: str) -> Tuple[List[str], List[str]]:
+    """Net added / removed visible lines between two snapshots (ignores reordering)."""
+    old_lines = [line.strip() for line in old.splitlines() if line.strip()]
+    new_lines = [line.strip() for line in new.splitlines() if line.strip()]
+    return _net_changes(old_lines, new_lines)
+
+
+def summarize_changes(added: List[str], removed: List[str]) -> str:
+    if not added and not removed:
+        # Same visible text, different hash -> only the order changed.
+        return "表示テキストの内容は同じですが、並び順が変わりました（新しい文章・画像の増減はありません）。"
+
+    pieces: List[str] = []
+    if added:
+        pieces.append(_format_change_group("追加された内容", added))
+    if removed:
+        pieces.append(_format_change_group("なくなった内容", removed))
+    return "\n".join(pieces)
 
 
 def diff_summary(old: str, new: str) -> str:
-    added: List[str] = []
-    removed: List[str] = []
-    for line in difflib.ndiff(old.splitlines(), new.splitlines()):
-        value = line[2:].strip()
-        if not value or line.startswith("? "):
-            continue
-        if line.startswith("+ ") and len(added) < 4:
-            added.append(value[:180])
-        elif line.startswith("- ") and len(removed) < 4:
-            removed.append(value[:180])
-    pieces = []
-    if added:
-        pieces.append("追加: " + " / ".join(added))
-    if removed:
-        pieces.append("削除: " + " / ".join(removed))
-    return "\n".join(pieces) or "表示内容が変更されました"
+    return summarize_changes(*content_change(old, new))
 
 
 def add_event(db: sqlite3.Connection, site_id: int, kind: str, summary: str) -> None:
@@ -482,7 +543,21 @@ def check_site(site_id: int) -> Dict[str, Any]:
                     )
                     return {"changed": False, "status": "unchanged"}
 
-                summary = diff_summary(site["snapshot"] or "", snapshot)
+                added, removed = content_change(site["snapshot"] or "", snapshot)
+                if not added and not removed:
+                    # Only the order of identical text changed: absorb it silently
+                    # as the new baseline instead of reporting a false update.
+                    db.execute(
+                        """
+                        UPDATE sites SET status = 'unchanged', last_checked = ?, last_error = NULL,
+                            etag = ?, last_modified = ?, content_hash = ?, snapshot = ?
+                        WHERE id = ?
+                        """,
+                        common_values,
+                    )
+                    return {"changed": False, "status": "unchanged"}
+
+                summary = summarize_changes(added, removed)
                 db.execute(
                     """
                     UPDATE sites SET status = 'changed', last_checked = ?, last_changed = ?,
@@ -608,34 +683,32 @@ class PageWatchHandler(BaseHTTPRequestHandler):
     def log_message(self, format_string: str, *args: Any) -> None:
         logging.info("%s - %s", self.address_string(), format_string % args)
 
-    def allowed_origin(self) -> Optional[str]:
-        origin = self.headers.get("Origin")
+    def cors_origin(self) -> Optional[str]:
+        # Origins allowed to call this local API from a browser page.
+        # The GitHub Pages UI controls the local server through fetch(), which
+        # requires CORS (and Chrome's Private Network Access preflight).
         allowed = getattr(self.server, "allowed_origins", DEFAULT_ALLOWED_ORIGINS)
+        origin = self.headers.get("Origin", "")
         return origin if origin in allowed else None
 
-    def cors_headers(self) -> Dict[str, str]:
-        origin = self.allowed_origin()
-        if not origin:
-            return {}
-        return {
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Methods": "GET, POST, PATCH, PUT, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
-            "Access-Control-Allow-Private-Network": "true",
-            "Vary": "Origin",
-        }
-
     def end_headers(self) -> None:
-        for name, value in self.cors_headers().items():
-            self.send_header(name, value)
+        origin = self.cors_origin()
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
         super().end_headers()
 
     def do_OPTIONS(self) -> None:  # noqa: N802
-        if not self.allowed_origin():
-            self.send_json({"error": "この公開元からの接続は許可されていません"}, 403)
-            return
-        self.send_response(204)
-        self.send_header("Content-Length", "0")
+        origin = self.cors_origin()
+        self.send_response(HTTPStatus.NO_CONTENT if origin else HTTPStatus.FORBIDDEN)
+        if origin:
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Max-Age", "600")
+            # Chrome Private Network Access: a public https page reaching
+            # into 127.0.0.1 must be explicitly allowed.
+            if self.headers.get("Access-Control-Request-Private-Network") == "true":
+                self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
 
     def send_json(self, data: Any, status: int = 200) -> None:

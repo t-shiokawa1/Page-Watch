@@ -1,64 +1,34 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  AppState,
+  Backend,
+  CloudBackend,
+  LocalBackend,
+  Settings,
+  Site,
+  SourceKind,
+  getCloudToken,
+  setCloudToken,
+} from "./backend";
 
-type Site = {
-  id: number;
-  name: string;
-  url: string;
-  interval_minutes: number;
-  enabled: number;
-  status: string;
-  last_checked: string | null;
-  last_changed: string | null;
-  last_error: string | null;
-  created_at: string;
-};
-
-type EventItem = {
-  id: number;
-  site_id: number;
-  site_name: string;
-  site_url: string;
-  kind: string;
-  summary: string;
-  created_at: string;
-};
-
-type Settings = {
-  desktop_notifications: boolean;
-  email_enabled: boolean;
-  email_to: string;
-  smtp_host: string;
-  smtp_port: number;
-  smtp_user: string;
-  smtp_password: string;
-  smtp_password_set: boolean;
-  smtp_from: string;
-  smtp_ssl: boolean;
-};
-
-type AppState = {
-  summary: { total: number; active: number; changed: number; errors: number };
-  sites: Site[];
-  events: EventItem[];
-  settings: Settings;
+const emptySettings: Settings = {
+  desktop_notifications: true,
+  email_enabled: false,
+  email_to: "",
+  smtp_host: "",
+  smtp_port: 587,
+  smtp_user: "",
+  smtp_password: "",
+  smtp_password_set: false,
+  smtp_from: "",
+  smtp_ssl: false,
 };
 
 const emptyState: AppState = {
   summary: { total: 0, active: 0, changed: 0, errors: 0 },
   sites: [],
   events: [],
-  settings: {
-    desktop_notifications: true,
-    email_enabled: false,
-    email_to: "",
-    smtp_host: "",
-    smtp_port: 587,
-    smtp_user: "",
-    smtp_password: "",
-    smtp_password_set: false,
-    smtp_from: "",
-    smtp_ssl: false,
-  },
+  settings: null,
 };
 
 const statusLabels: Record<string, { label: string; tone: string }> = {
@@ -71,25 +41,12 @@ const statusLabels: Record<string, { label: string; tone: string }> = {
   paused: { label: "一時停止", tone: "neutral" },
 };
 
-const apiBase = (import.meta.env.VITE_API_BASE || "").replace(/\/$/, "");
+const SOURCE_KEY = "pagewatch-source";
 
-async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`${apiBase}${path}`, {
-      ...options,
-      headers: { "Content-Type": "application/json", ...(options?.headers || {}) },
-    });
-  } catch {
-    throw new Error(
-      apiBase
-        ? "このMacの監視エンジンに接続できません。start.commandを起動してください。"
-        : "監視エンジンに接続できません。",
-    );
-  }
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "処理に失敗しました");
-  return data as T;
+function defaultSource(): SourceKind {
+  const saved = localStorage.getItem(SOURCE_KEY);
+  if (saved === "local" || saved === "cloud") return saved;
+  return window.location.hostname.endsWith("github.io") ? "cloud" : "local";
 }
 
 function formatDate(value: string | null): string {
@@ -121,154 +78,146 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function App() {
+  const [source, setSource] = useState<SourceKind>(defaultSource);
+  const backend: Backend = useMemo(
+    () => (source === "cloud" ? new CloudBackend() : new LocalBackend()),
+    [source],
+  );
   const [state, setState] = useState<AppState>(emptyState);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
-  const [interval, setIntervalValue] = useState(15);
+  const [interval, setIntervalValue] = useState(60);
   const settingsDialog = useRef<HTMLDialogElement>(null);
-  const [settings, setSettings] = useState<Settings>(emptyState.settings);
+  const cloudDialog = useRef<HTMLDialogElement>(null);
+  const [settings, setSettings] = useState<Settings>(emptySettings);
+  const [tokenDraft, setTokenDraft] = useState("");
 
-  const loadState = useCallback(async (quiet = false) => {
-    try {
-      const next = await api<AppState>("/api/state");
-      setState(next);
-      setSettings((current) =>
-        settingsDialog.current?.open ? current : { ...next.settings, smtp_password: "" },
-      );
-    } catch (error) {
-      if (!quiet) setMessage(error instanceof Error ? error.message : "接続できません");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const loadState = useCallback(
+    async (quiet = false) => {
+      try {
+        const next = await backend.loadState();
+        setState(next);
+        if (next.settings) {
+          setSettings((current) =>
+            settingsDialog.current?.open ? current : { ...next.settings!, smtp_password: "" },
+          );
+        }
+      } catch (error) {
+        if (!quiet) setMessage(error instanceof Error ? error.message : "接続できません");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [backend],
+  );
 
   useEffect(() => {
+    setState(emptyState);
+    setLoading(true);
     loadState();
-    const timer = window.setInterval(() => loadState(true), 5000);
+    const period = backend.kind === "cloud" ? 20000 : 5000;
+    const timer = window.setInterval(() => loadState(true), period);
     return () => window.clearInterval(timer);
-  }, [loadState]);
+  }, [backend, loadState]);
+
+  useEffect(() => {
+    if (!backend.intervalChoices.some((c) => c.value === interval)) {
+      setIntervalValue(60);
+    }
+  }, [backend, interval]);
+
+  const switchSource = (next: SourceKind) => {
+    localStorage.setItem(SOURCE_KEY, next);
+    setSource(next);
+    if (next === "cloud" && !getCloudToken()) {
+      setTokenDraft("");
+      cloudDialog.current?.showModal();
+    }
+  };
 
   const showMessage = (value: string) => {
     setMessage(value);
-    window.setTimeout(() => setMessage(null), 3500);
+    window.setTimeout(() => setMessage(null), 4500);
   };
 
-  const addSite = async (event: FormEvent) => {
-    event.preventDefault();
-    setBusy("add");
+  const run = async (key: string, action: () => Promise<string | void>, reload = true) => {
+    setBusy(key);
     try {
-      await api("/api/sites", {
-        method: "POST",
-        body: JSON.stringify({ name, url, interval_minutes: interval }),
-      });
+      const result = await action();
+      if (typeof result === "string") showMessage(result);
+      if (reload) await loadState();
+    } catch (error) {
+      showMessage(error instanceof Error ? error.message : "処理に失敗しました");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const addSite = (event: FormEvent) => {
+    event.preventDefault();
+    run("add", async () => {
+      await backend.addSite({ name, url, interval_minutes: interval });
       setName("");
       setUrl("");
-      showMessage("監視サイトを追加しました。最初の比較基準を作成します。 ");
-      await loadState();
-    } catch (error) {
-      showMessage(error instanceof Error ? error.message : "追加できませんでした");
-    } finally {
-      setBusy(null);
-    }
+      return backend.kind === "cloud"
+        ? "クラウドの監視リストに追加しました。初回チェックを開始します。"
+        : "監視サイトを追加しました。最初の比較基準を作成します。";
+    });
   };
 
-  const checkSite = async (site: Site) => {
-    setBusy(`check-${site.id}`);
-    try {
-      const result = await api<{ changed: boolean }>(`/api/sites/${site.id}/check`, {
-        method: "POST",
-        body: "{}",
-      });
-      showMessage(result.changed ? `${site.name} の更新を検知しました。` : `${site.name} に変化はありません。`);
-      await loadState();
-    } catch (error) {
-      showMessage(error instanceof Error ? error.message : "確認に失敗しました");
-      await loadState();
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const toggleSite = async (site: Site) => {
-    setBusy(`toggle-${site.id}`);
-    try {
-      await api(`/api/sites/${site.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ enabled: !site.enabled }),
-      });
-      await loadState();
-    } catch (error) {
-      showMessage(error instanceof Error ? error.message : "変更できませんでした");
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const deleteSite = async (site: Site) => {
+  const deleteSite = (site: Site) => {
     if (!window.confirm(`「${site.name}」と更新履歴を削除しますか？`)) return;
-    setBusy(`delete-${site.id}`);
-    try {
-      await api(`/api/sites/${site.id}`, { method: "DELETE" });
-      showMessage("監視サイトを削除しました。");
-      await loadState();
-    } catch (error) {
-      showMessage(error instanceof Error ? error.message : "削除できませんでした");
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const checkAll = async () => {
-    setBusy("all");
-    try {
-      await api("/api/check-all", { method: "POST", body: "{}" });
-      showMessage("すべてのサイトを順番に確認しています。");
-      window.setTimeout(() => loadState(), 1200);
-    } catch (error) {
-      showMessage(error instanceof Error ? error.message : "確認を開始できませんでした");
-    } finally {
-      setBusy(null);
-    }
+    run(`delete-${site.id}`, async () => {
+      await backend.deleteSite(site);
+      return "監視サイトを削除しました。";
+    });
   };
 
   const openSettings = () => {
-    setSettings({ ...state.settings, smtp_password: "" });
-    settingsDialog.current?.showModal();
+    if (backend.kind === "cloud") {
+      setTokenDraft(getCloudToken());
+      cloudDialog.current?.showModal();
+    } else {
+      if (state.settings) setSettings({ ...state.settings, smtp_password: "" });
+      settingsDialog.current?.showModal();
+    }
   };
 
-  const saveEmailSettings = async (event: FormEvent) => {
+  const saveToken = (event: FormEvent) => {
     event.preventDefault();
-    setBusy("settings");
-    try {
-      const result = await api<{ settings: Settings }>("/api/settings", {
-        method: "PUT",
-        body: JSON.stringify(settings),
-      });
-      setSettings({ ...result.settings, smtp_password: "" });
-      settingsDialog.current?.close();
-      showMessage("通知設定を保存しました。");
-      await loadState();
-    } catch (error) {
-      showMessage(error instanceof Error ? error.message : "設定を保存できませんでした");
-    } finally {
-      setBusy(null);
-    }
+    setCloudToken(tokenDraft);
+    cloudDialog.current?.close();
+    showMessage(tokenDraft ? "トークンを保存しました。" : "トークンを削除しました。");
+    loadState();
   };
 
-  const testEmail = async () => {
-    setBusy("test-email");
-    try {
-      await api("/api/settings", { method: "PUT", body: JSON.stringify(settings) });
-      await api("/api/settings/test-email", { method: "POST", body: "{}" });
-      showMessage("テストメールを送信しました。");
-    } catch (error) {
-      showMessage(error instanceof Error ? error.message : "テスト送信に失敗しました");
-    } finally {
-      setBusy(null);
-    }
+  const local = backend.kind === "local" ? (backend as LocalBackend) : null;
+
+  const saveEmailSettings = (event: FormEvent) => {
+    event.preventDefault();
+    run("settings", async () => {
+      if (!local) return;
+      const saved = await local.saveSettings(settings);
+      setSettings({ ...saved, smtp_password: "" });
+      settingsDialog.current?.close();
+      return "通知設定を保存しました。";
+    });
+  };
+
+  const testEmail = () => {
+    run(
+      "test-email",
+      async () => {
+        if (!local) return;
+        await local.saveSettings(settings);
+        await local.testEmail();
+        return "テストメールを送信しました。";
+      },
+      false,
+    );
   };
 
   return (
@@ -279,43 +228,43 @@ function App() {
           <span>PAGEWATCH</span>
         </a>
         <div className="top-actions">
-          <span className="local-chip"><span /> このMacで監視中</span>
-          <button className="icon-button" onClick={openSettings} aria-label="通知設定" title="通知設定">
+          <div className="source-toggle" role="tablist" aria-label="監視の実行場所">
+            <button
+              role="tab"
+              aria-selected={source === "local"}
+              className={source === "local" ? "source-active" : ""}
+              onClick={() => switchSource("local")}
+            >
+              このMac
+            </button>
+            <button
+              role="tab"
+              aria-selected={source === "cloud"}
+              className={source === "cloud" ? "source-active" : ""}
+              onClick={() => switchSource("cloud")}
+            >
+              クラウド
+            </button>
+          </div>
+          <button className="icon-button" onClick={openSettings} aria-label="設定" title="設定">
             ⚙
           </button>
         </div>
       </header>
 
       <main id="top">
-        <section className="hero">
-          <div className="hero-copy">
-            <p className="eyebrow">LOCAL WEBSITE MONITOR</p>
-            <h1>変化を、<br /><em>見逃さない。</em></h1>
-            <p className="hero-description">
-              気になるWebページを静かに見守り、表示される文章や画像に変化があれば知らせます。
-              データはすべて、このMacの中だけに保存されます。
-            </p>
-          </div>
-          <div className="hero-meter" aria-label="監視状況">
-            <div className="orbit orbit-one" />
-            <div className="orbit orbit-two" />
-            <div className="meter-center">
-              <strong>{state.summary.active}</strong>
-              <span>ACTIVE</span>
-            </div>
-            <span className="meter-label meter-label-top">CHECK</span>
-            <span className="meter-label meter-label-bottom">LOCAL</span>
-          </div>
-        </section>
-
-        <section className="add-panel" aria-labelledby="add-title">
+        <section className="add-panel add-panel-first" aria-labelledby="add-title">
           <div className="section-index">01</div>
           <div className="panel-heading">
             <div>
               <p className="eyebrow">ADD A WATCH</p>
               <h2 id="add-title">監視するサイトを追加</h2>
             </div>
-            <p>URLを登録すると、最初の内容を比較基準として保存します。</p>
+            <p>
+              {backend.kind === "cloud"
+                ? "クラウド（GitHub Actions）が定期チェックします。Macを閉じていても動きます。"
+                : "このMacが定期チェックします。データはこのMacの外へ出ません。"}
+            </p>
           </div>
           <form className="add-form" onSubmit={addSite}>
             <label className="field field-url">
@@ -335,11 +284,9 @@ function App() {
             <label className="field field-interval">
               <span>確認間隔</span>
               <select value={interval} onChange={(event) => setIntervalValue(Number(event.target.value))}>
-                <option value={5}>5分</option>
-                <option value={15}>15分</option>
-                <option value={30}>30分</option>
-                <option value={60}>1時間</option>
-                <option value={360}>6時間</option>
+                {backend.intervalChoices.map((choice) => (
+                  <option key={choice.value} value={choice.value}>{choice.label}</option>
+                ))}
               </select>
             </label>
             <button className="primary-button" type="submit" disabled={busy === "add"}>
@@ -354,7 +301,11 @@ function App() {
               <span className="section-index">02</span>
               <div><p className="eyebrow">WATCHING NOW</p><h2 id="watch-title">監視リスト</h2></div>
             </div>
-            <button className="secondary-button" onClick={checkAll} disabled={busy === "all"}>
+            <button
+              className="secondary-button"
+              onClick={() => run("all", () => backend.checkAll(), false)}
+              disabled={busy === "all"}
+            >
               <span className={busy === "all" ? "spin" : ""}>↻</span> すべて確認
             </button>
           </div>
@@ -382,13 +333,39 @@ function App() {
                 <div className="site-meta">
                   <span>最終確認</span>
                   <strong>{formatDate(site.last_checked)}</strong>
-                  <small>{site.interval_minutes}分ごと</small>
+                  <select
+                    className="interval-select"
+                    value={site.interval_minutes}
+                    onChange={(event) =>
+                      run(`interval-${site.id}`, async () => {
+                        await backend.setInterval(site, Number(event.target.value));
+                        return "確認間隔を変更しました。";
+                      })
+                    }
+                    disabled={busy === `interval-${site.id}`}
+                    aria-label="確認間隔"
+                  >
+                    {backend.intervalChoices.map((choice) => (
+                      <option key={choice.value} value={choice.value}>{choice.label}ごと</option>
+                    ))}
+                    {!backend.intervalChoices.some((c) => c.value === site.interval_minutes) && (
+                      <option value={site.interval_minutes}>{site.interval_minutes}分ごと</option>
+                    )}
+                  </select>
                 </div>
                 <div className="site-actions">
-                  <button onClick={() => checkSite(site)} disabled={busy === `check-${site.id}` || !site.enabled} title="今すぐ確認">
+                  <button
+                    onClick={() => run(`check-${site.id}`, () => backend.checkSite(site))}
+                    disabled={busy === `check-${site.id}` || !site.enabled}
+                    title="今すぐ確認"
+                  >
                     <span className={busy === `check-${site.id}` ? "spin" : ""}>↻</span>
                   </button>
-                  <button onClick={() => toggleSite(site)} disabled={busy === `toggle-${site.id}`} title={site.enabled ? "一時停止" : "再開"}>
+                  <button
+                    onClick={() => run(`toggle-${site.id}`, () => backend.toggleSite(site))}
+                    disabled={busy === `toggle-${site.id}`}
+                    title={site.enabled ? "一時停止" : "再開"}
+                  >
                     {site.enabled ? "Ⅱ" : "▶"}
                   </button>
                   <button className="danger-action" onClick={() => deleteSite(site)} disabled={busy === `delete-${site.id}`} title="削除">×</button>
@@ -424,12 +401,51 @@ function App() {
       </main>
 
       <footer>
-        <span>PAGEWATCH / LOCAL ONLY</span>
-        <p>あなたの監視データは、このMacから外へ保存されません。</p>
+        <span>PAGEWATCH / {source === "cloud" ? "CLOUD" : "LOCAL ONLY"}</span>
+        <p>
+          {source === "cloud"
+            ? "監視リストと履歴は、あなただけがアクセスできる非公開リポジトリに保存されます。"
+            : "あなたの監視データは、このMacから外へ保存されません。"}
+        </p>
         <a href="#top">TOP ↑</a>
       </footer>
 
-      <dialog className="settings-dialog" ref={settingsDialog} onClose={() => setSettings({ ...state.settings, smtp_password: "" })}>
+      <dialog className="settings-dialog" ref={cloudDialog}>
+        <form onSubmit={saveToken}>
+          <div className="dialog-heading">
+            <div><p className="eyebrow">CLOUD</p><h2>クラウド設定</h2></div>
+            <button type="button" onClick={() => cloudDialog.current?.close()} aria-label="閉じる">×</button>
+          </div>
+          <div className="email-fields">
+            <label>
+              <span>GitHubアクセストークン</span>
+              <input
+                type="password"
+                value={tokenDraft}
+                onChange={(event) => setTokenDraft(event.target.value)}
+                placeholder="github_pat_..."
+              />
+            </label>
+            <p className="dialog-note">
+              このブラウザにのみ保存されます。GitHubの
+              「Settings → Developer settings → Fine-grained tokens」で、
+              リポジトリ <code>pagewatch-data</code> だけを対象に
+              Contents（Read and write）と Actions（Read and write）を許可した
+              トークンを作成してください。
+            </p>
+            <p className="dialog-note">
+              メール通知は <code>pagewatch-data</code> リポジトリの
+              Settings → Secrets and variables → Actions に
+              SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / EMAIL_TO を登録すると有効になります。
+            </p>
+          </div>
+          <div className="dialog-actions">
+            <button type="submit" className="primary-button"><span>保存</span><b>↗</b></button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog className="settings-dialog" ref={settingsDialog} onClose={() => state.settings && setSettings({ ...state.settings, smtp_password: "" })}>
         <form onSubmit={saveEmailSettings}>
           <div className="dialog-heading">
             <div><p className="eyebrow">NOTIFICATIONS</p><h2>通知設定</h2></div>

@@ -3,7 +3,6 @@ set -euo pipefail
 
 PAGEWATCH_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 LABEL="local.pagewatch.monitor"
-PAGEWATCH_UI_URL="https://t-shiokawa1.github.io/pagewatch/"
 LAUNCH_DIR="$HOME/Library/LaunchAgents"
 PLIST_PATH="$LAUNCH_DIR/$LABEL.plist"
 
@@ -51,5 +50,5 @@ launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
 launchctl kickstart -k "gui/$(id -u)/$LABEL"
 
 sleep 1
-open "$PAGEWATCH_UI_URL"
+open "http://127.0.0.1:8765"
 echo "PageWatchをインストールしました。ブラウザを閉じても監視を続けます。"

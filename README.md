@@ -15,17 +15,9 @@
 
 監視URL・更新履歴・メール設定は `data/` に保存され、GitHubには含まれません。
 
-## 固定URLで開く
+## まず試す
 
-公開後は、毎回ファイルをダウンロードせず次のURLから管理画面を開けます。
-
-<https://t-shiokawa1.github.io/pagewatch/>
-
-画面はGitHub Pagesから配信されますが、監視処理・URL・履歴・メール設定はこのMacの `server.py` と `data/` に残ります。利用時は `start.command` を起動してください。すでに監視エンジンが動いている場合は、固定URLだけが開きます。
-
-## まず試す（ローカル画面）
-
-`index.html`ではなく、`start.command` をダブルクリックします。PageWatchは監視データをローカル保存するため、HTMLファイル単体では動作しません。初回だけmacOSから実行確認が表示される場合があります。
+`start.command` をダブルクリックします。初回だけmacOSから実行確認が表示される場合があります。
 
 ターミナルから起動する場合:
 
@@ -33,7 +25,7 @@
 ./start.command
 ```
 
-公開前やオフライン時は、`http://127.0.0.1:8765` を直接開いても使えます。サーバーは自分のPCからだけアクセスできるアドレスに限定しています。
+起動後、`http://127.0.0.1:8765` が開きます。サーバーは自分のPCからだけアクセスできるアドレスに限定しています。
 
 ## ブラウザを閉じても監視する
 
@@ -65,15 +57,15 @@ chmod +x uninstall-macos.sh
 
 自動起動だけを解除し、監視URL・履歴・設定は残します。
 
-## GitHub Pagesへの公開
+## GitHubへ公開する場合
 
-`main` ブランチへ変更をpushすると、`.github/workflows/pages.yml` が画面を自動ビルドしてGitHub Pagesへ反映します。通常は数分で固定URLの表示が更新されます。`.gitignore` により、次の個人データは公開されません。
+このフォルダをリポジトリにします。`.gitignore` により、次の個人データは公開されません。
 
 - `data/` — URL、履歴、メール認証情報
 - `node_modules/` — 開発用パッケージ
 - `dist/` — ビルド成果物
 
-公開画面が接続できるローカルAPIの公開元は `https://t-shiokawa1.github.io` だけに限定しています。リポジトリの所有者を変更する場合は、`server.py` の `DEFAULT_ALLOWED_ORIGINS` と固定URLを変更してください。
+別のPCでは `npm install` と `npm run build` を実行してから起動します。
 
 ## 開発・テスト
 

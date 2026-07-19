@@ -1,7 +1,9 @@
+# Personal data: watch list, history, mail credentials (never publish)
+data/
+
+# Dependencies and build output
 node_modules/
 dist/
-data/
-__pycache__/
-*.pyc
+
+# macOS noise
 .DS_Store
-.env

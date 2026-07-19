@@ -29,8 +29,17 @@ class VisibleContentTests(unittest.TestCase):
 
     def test_diff_summary_reports_additions_and_removals(self):
         result = server.diff_summary("古い文章\n共通", "新しい文章\n共通")
-        self.assertIn("追加: 新しい文章", result)
-        self.assertIn("削除: 古い文章", result)
+        self.assertIn("追加された内容", result)
+        self.assertIn("新しい文章", result)
+        self.assertIn("なくなった内容", result)
+        self.assertIn("古い文章", result)
+
+    def test_diff_summary_treats_reordering_as_no_real_change(self):
+        old = "A\nB\nC"
+        new = "C\nA\nB"
+        result = server.diff_summary(old, new)
+        self.assertIn("並び順", result)
+        self.assertNotIn("追加された内容", result)
 
     def test_normalizes_json_for_change_detection(self):
         result = server.normalize_content(
@@ -46,18 +55,16 @@ class VisibleContentTests(unittest.TestCase):
 
 
 class LocalApiSecurityTests(unittest.TestCase):
-    def handler(self, origin: str):
+    def handler(self, origin: str) -> server.PageWatchHandler:
         handler = server.PageWatchHandler.__new__(server.PageWatchHandler)
-        handler.server = SimpleNamespace(allowed_origins={"https://owner.github.io"})
+        handler.server = SimpleNamespace(allowed_origins={"https://owner.github.io"})  # type: ignore[assignment]
         handler.headers = Message()
         handler.headers["Origin"] = origin
         return handler
 
     def test_allows_only_configured_pages_origin(self):
-        allowed = self.handler("https://owner.github.io").cors_headers()
-        self.assertEqual(allowed["Access-Control-Allow-Origin"], "https://owner.github.io")
-        self.assertEqual(allowed["Access-Control-Allow-Private-Network"], "true")
-        self.assertEqual(self.handler("https://attacker.example").cors_headers(), {})
+        self.assertEqual(self.handler("https://owner.github.io").cors_origin(), "https://owner.github.io")
+        self.assertIsNone(self.handler("https://attacker.example").cors_origin())
 
 
 class DatabaseTests(unittest.TestCase):
@@ -107,8 +114,33 @@ class DatabaseTests(unittest.TestCase):
             )
             changed = server.check_site(site_id)
             self.assertTrue(changed["changed"])
-            self.assertIn("追加: 更新後の内容", changed["summary"])
+            self.assertIn("更新後の内容", changed["summary"])
             self.assertEqual(server.site_rows()[0]["status"], "changed")
+        finally:
+            server.fetch_site = original_fetch
+
+    def test_check_site_ignores_reorder_only_change(self):
+        server.init_database()
+        site_id = server.site_rows()[0]["id"]
+        original_fetch = server.fetch_site
+        server.save_settings({"desktop_notifications": False, "email_enabled": False})
+        try:
+            server.fetch_site = lambda _site: (
+                "<html><body><p>Alpha</p><p>Beta</p><p>Gamma</p></body></html>",
+                {"etag": "a", "last_modified": ""},
+            )
+            server.check_site(site_id)  # baseline
+
+            # Same three items, different order -> must not count as an update.
+            server.fetch_site = lambda _site: (
+                "<html><body><p>Gamma</p><p>Alpha</p><p>Beta</p></body></html>",
+                {"etag": "b", "last_modified": ""},
+            )
+            result = server.check_site(site_id)
+            self.assertFalse(result["changed"])
+            self.assertEqual(server.site_rows()[0]["status"], "unchanged")
+            kinds = [e["kind"] for e in server.event_rows()]
+            self.assertNotIn("changed", kinds)
         finally:
             server.fetch_site = original_fetch
 
