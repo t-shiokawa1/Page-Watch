@@ -1,92 +1,71 @@
 # PageWatch
 
-自分専用のWebサイト更新監視ツールです。管理画面はブラウザで開きますが、監視処理はmacOSのバックグラウンドで動くため、ブラウザを閉じても監視を続けます。
+自分専用のWebサイト更新監視ツールです。管理画面は <https://t-shiokawa1.github.io/pagewatch/> で、監視の実行場所を2つから選べます。
+
+| モード | 監視する場所 | Macを閉じたら | データの保存先 |
+|--------|--------------|---------------|----------------|
+| **このMac** | 手元のMac（`server.py`） | 止まる（復帰後に再開） | このMacの中だけ（`data/`） |
+| **クラウド** | GitHub Actions | 動き続ける | 非公開リポジトリ `pagewatch-data` |
+
+画面右上のトグルでいつでも切り替えられます。PCごとに「このMac」のリストは独立し、「クラウド」のリストは全PC共通です。
 
 ## できること
 
-- 管理画面から監視URLを追加・削除
-- 5分〜6時間の確認間隔をサイトごとに設定
-- ページ内の表示テキストと画像URLを比較
-- スクリプト、スタイル、非表示要素、埋め込みフレームを比較から除外
-- 更新履歴をSQLiteへローカル保存
-- macOS通知センターへの通知
-- SMTPメール通知
-- 一時停止、手動確認、一括確認
+- 監視URLの追加・削除・一時停止・今すぐ確認
+- 確認間隔をサイトごとに設定（ローカル: 5分〜6時間 / クラウド: 30分〜6時間）
+- HTML・JSON・プレーンテキストの変化を検知（表示テキストと画像URLを比較。並び順だけの変化は無視）
+- 更新履歴の記録、メール通知（ローカルはmacOS通知も）
 
-監視URL・更新履歴・メール設定は `data/` に保存され、GitHubには含まれません。
+## クラウドモードの初期設定（1回だけ）
 
-## まず試す
+1. GitHubの **Settings → Developer settings → Fine-grained tokens** でトークンを作成
+   - Repository access: `pagewatch-data` のみ
+   - Permissions: **Contents (Read and write)** と **Actions (Read and write)**
+2. <https://t-shiokawa1.github.io/pagewatch/> を開き、「クラウド」→ 右上の歯車 → トークンを貼り付けて保存
+3. メール通知が必要なら、`pagewatch-data` の **Settings → Secrets and variables → Actions** に以下を登録
+   - `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `EMAIL_TO`（任意で `SMTP_FROM`、SSL直結なら `SMTP_SSL=1`）
 
-`start.command` をダブルクリックします。初回だけmacOSから実行確認が表示される場合があります。
+チェックは30分ごとのスケジュールで起動し、各サイトの間隔に従って実行されます（GitHub Actionsの仕様上、数分遅れることがあります）。
 
-ターミナルから起動する場合:
+## ローカルモードを使う
 
-```bash
-./start.command
-```
+`start.command` をダブルクリックします（初回は自動で `npm install` と `npm run build` が走ります）。起動後は Pages の画面か `http://127.0.0.1:8765` のどちらからでも操作できます。
 
-起動後、`http://127.0.0.1:8765` が開きます。サーバーは自分のPCからだけアクセスできるアドレスに限定しています。
-
-## ブラウザを閉じても監視する
+ログイン時の自動起動:
 
 ```bash
-chmod +x install-macos.sh
-./install-macos.sh
+./install-macos.sh   # 解除は ./uninstall-macos.sh
 ```
 
-macOSへログインするとPageWatchが自動起動します。PCがスリープまたは電源オフの間は確認できません。復帰後に監視を再開します。
-
-## メール通知
-
-画面右上の歯車から設定します。Gmailの場合はGoogleアカウントで発行したアプリパスワードが必要です。一般的なGmail設定は次のとおりです。
-
-- SMTPホスト: `smtp.gmail.com`
-- ポート: `587`
-- SSL接続: オフ（STARTTLSを使用）
-- ユーザー名・送信元: Gmailアドレス
-- パスワード: アプリパスワード
-
-認証情報は `data/settings.json` に所有者だけが読める権限で保存されます。
-
-## 自動起動を解除する
-
-```bash
-chmod +x uninstall-macos.sh
-./uninstall-macos.sh
-```
-
-自動起動だけを解除し、監視URL・履歴・設定は残します。
-
-## GitHubへ公開する場合
-
-このフォルダをリポジトリにします。`.gitignore` により、次の個人データは公開されません。
-
-- `data/` — URL、履歴、メール認証情報
-- `node_modules/` — 開発用パッケージ
-- `dist/` — ビルド成果物
-
-別のPCでは `npm install` と `npm run build` を実行してから起動します。
+メール通知・macOS通知は歯車から設定します。Gmailはアプリパスワードが必要です（SMTPホスト `smtp.gmail.com` / ポート `587` / SSLオフ）。認証情報は `data/settings.json` に所有者だけが読める権限で保存されます。
 
 ## 開発・テスト
 
 ```bash
 npm install
-npm run dev
+npm run dev          # フロント (Vite)
+python3 server.py    # ローカルAPI（別ターミナル）
 ```
-
-Python APIは別のターミナルで起動します。
-
-```bash
-python3 server.py
-```
-
-テスト:
 
 ```bash
 python3 -m unittest discover -s tests -v
 npm run build
 ```
 
-## 現在の比較方法
+`main` へpushすると GitHub Actions が自動で Pages へデプロイします。
 
-通常のHTMLレスポンスから、画面に表示される文章と画像URLを抽出して比較します。JavaScriptの実行後にだけ表示される内容や、同じURLのまま画像ファイルだけが差し替わるケースは初版では検知対象外です。
+## 構成
+
+```
+server.py        ローカル監視サーバー + JSON API（127.0.0.1:8765）
+cloud_check.py   クラウド監視（pagewatch-data の Actions から実行）
+src/             管理画面（React）。backend.ts がローカル/クラウドを切替
+data/            ローカルの監視データ（Git非公開）
+pagewatch-data   クラウドの監視リスト・履歴（非公開リポジトリ）
+```
+
+## 検知できないもの
+
+- JavaScriptの実行後にだけ表示される内容
+- 同じURLのまま中身だけ差し替わった画像
+- ボット対策で自動アクセスを拒否するサイト（HTTP 403など。画面に理由を表示します）
