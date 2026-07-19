@@ -32,6 +32,18 @@ class VisibleContentTests(unittest.TestCase):
         self.assertIn("追加: 新しい文章", result)
         self.assertIn("削除: 古い文章", result)
 
+    def test_normalizes_json_for_change_detection(self):
+        result = server.normalize_content(
+            '{"uuid": "new-id", "nested": {"value": 2}}',
+            "application/json; charset=utf-8",
+            "https://httpbin.org/uuid",
+        )
+        self.assertEqual(result, '{"nested":{"value":2},"uuid":"new-id"}')
+
+    def test_normalizes_plain_text(self):
+        result = server.normalize_content(" first  line \n\n second\tline ", "text/plain", "https://example.com/")
+        self.assertEqual(result, "first line\nsecond line")
+
 
 class LocalApiSecurityTests(unittest.TestCase):
     def handler(self, origin: str):
