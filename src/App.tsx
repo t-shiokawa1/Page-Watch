@@ -42,10 +42,29 @@ const statusLabels: Record<string, { label: string; tone: string }> = {
 };
 
 const SOURCE_KEY = "pagewatch-source";
+const ADMIN_KEY = "pagewatch-admin";
 const DOWNLOAD_URL = "https://github.com/t-shiokawa1/pagewatch/archive/refs/heads/main.zip";
 const TOKEN_URL = "https://github.com/settings/personal-access-tokens/new";
 
-function defaultSource(): SourceKind {
+// Cloud mode writes to the owner's private data repo, so only the owner can use
+// it. Regular visitors see only "このMac". The owner unlocks the cloud toggle by
+// opening the page once with ?admin (persisted per-browser); locking is via ?admin=off.
+function detectAdmin(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has("admin")) {
+    const on = params.get("admin") !== "off";
+    if (on) localStorage.setItem(ADMIN_KEY, "1");
+    else localStorage.removeItem(ADMIN_KEY);
+    params.delete("admin");
+    const query = params.toString();
+    window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : ""));
+    return on;
+  }
+  return localStorage.getItem(ADMIN_KEY) === "1";
+}
+
+function defaultSource(isAdmin: boolean): SourceKind {
+  if (!isAdmin) return "local";
   const saved = localStorage.getItem(SOURCE_KEY);
   if (saved === "local" || saved === "cloud") return saved;
   return window.location.hostname.endsWith("github.io") ? "cloud" : "local";
@@ -80,7 +99,8 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function App() {
-  const [source, setSource] = useState<SourceKind>(defaultSource);
+  const [isAdmin] = useState(detectAdmin);
+  const [source, setSource] = useState<SourceKind>(() => defaultSource(isAdmin));
   const backend: Backend = useMemo(
     () => (source === "cloud" ? new CloudBackend() : new LocalBackend()),
     [source],
@@ -243,24 +263,26 @@ function App() {
           <span>PAGEWATCH</span>
         </a>
         <div className="top-actions">
-          <div className="source-toggle" role="tablist" aria-label="監視の実行場所">
-            <button
-              role="tab"
-              aria-selected={source === "local"}
-              className={source === "local" ? "source-active" : ""}
-              onClick={() => switchSource("local")}
-            >
-              このMac
-            </button>
-            <button
-              role="tab"
-              aria-selected={source === "cloud"}
-              className={source === "cloud" ? "source-active" : ""}
-              onClick={() => switchSource("cloud")}
-            >
-              クラウド
-            </button>
-          </div>
+          {isAdmin && (
+            <div className="source-toggle" role="tablist" aria-label="監視の実行場所">
+              <button
+                role="tab"
+                aria-selected={source === "local"}
+                className={source === "local" ? "source-active" : ""}
+                onClick={() => switchSource("local")}
+              >
+                このMac
+              </button>
+              <button
+                role="tab"
+                aria-selected={source === "cloud"}
+                className={source === "cloud" ? "source-active" : ""}
+                onClick={() => switchSource("cloud")}
+              >
+                クラウド
+              </button>
+            </div>
+          )}
           <button className="icon-button" onClick={openSettings} aria-label="設定" title="設定">
             ⚙
           </button>
