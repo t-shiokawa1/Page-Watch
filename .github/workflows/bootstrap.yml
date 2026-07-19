@@ -589,7 +589,7 @@ jobs:
             xbN4Fs/iWTyLZ/EsnsWzeBbP4lk8i+d/7vPf7sVOhgAwAgA=
         run: |
           printf '%s' "$PAGEWATCH_ARCHIVE" | tr -d '[:space:]' | base64 --decode | tar -xz
-          rm -f .github/workflows/bootstrap.yml
+          rm -f .github/workflows/pages.yml
       - name: Commit project
         run: |
           git config user.name "github-actions[bot]"
