@@ -270,6 +270,30 @@ def normalize_html(html_text: str, base_url: str) -> str:
     return parser.normalized()
 
 
+def normalize_text(text: str) -> str:
+    lines = []
+    for line in text.splitlines():
+        clean = re.sub(r"\s+", " ", line).strip()
+        if clean:
+            lines.append(clean)
+    return "\n".join(lines)
+
+
+def normalize_content(content: str, content_type: str, base_url: str) -> str:
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    if media_type in {"text/html", "application/xhtml+xml"}:
+        return normalize_html(content, base_url)
+    if media_type == "application/json" or media_type.endswith("+json"):
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            return normalize_text(content)
+        return json.dumps(parsed, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    if media_type == "text/plain":
+        return normalize_text(content)
+    raise RuntimeError(f"対応していない形式です: {content_type or 'Content-Type不明'}")
+
+
 def decode_page(raw: bytes, content_type: str) -> str:
     match = re.search(r"charset=([\w-]+)", content_type, flags=re.IGNORECASE)
     candidates = [match.group(1)] if match else []
@@ -285,7 +309,7 @@ def decode_page(raw: bytes, content_type: str) -> str:
 def fetch_site(site: sqlite3.Row) -> Tuple[str, Dict[str, str]]:
     headers = {
         "User-Agent": USER_AGENT,
-        "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
+        "Accept": "text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.5",
     }
     if site["etag"]:
         headers["If-None-Match"] = site["etag"]
@@ -295,14 +319,20 @@ def fetch_site(site: sqlite3.Row) -> Tuple[str, Dict[str, str]]:
     try:
         with urlopen(request, timeout=30) as response:
             content_type = response.headers.get("Content-Type", "")
-            if "text/html" not in content_type and "application/xhtml+xml" not in content_type:
-                raise RuntimeError(f"HTMLページではありません: {content_type or 'Content-Type不明'}")
+            media_type = content_type.split(";", 1)[0].strip().lower()
+            supported = (
+                media_type in {"text/html", "application/xhtml+xml", "application/json", "text/plain"}
+                or media_type.endswith("+json")
+            )
+            if not supported:
+                raise RuntimeError(f"対応していない形式です: {content_type or 'Content-Type不明'}")
             raw = response.read(MAX_PAGE_BYTES + 1)
             if len(raw) > MAX_PAGE_BYTES:
                 raise RuntimeError("ページサイズが10MBを超えています")
             return decode_page(raw, content_type), {
                 "etag": response.headers.get("ETag", ""),
                 "last_modified": response.headers.get("Last-Modified", ""),
+                "content_type": content_type,
             }
     except HTTPError as exc:
         if exc.code == HTTPStatus.NOT_MODIFIED:
@@ -416,7 +446,7 @@ def check_site(site_id: int) -> Dict[str, Any]:
                     )
                     return {"changed": False, "status": "unchanged"}
 
-                snapshot = normalize_html(html_text, site["url"])
+                snapshot = normalize_content(html_text, headers.get("content_type", "text/html"), site["url"])
                 if not snapshot:
                     raise RuntimeError("比較できる表示内容が見つかりません")
                 content_hash = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()
