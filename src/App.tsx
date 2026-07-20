@@ -3,6 +3,7 @@ import {
   AppState,
   Backend,
   CloudBackend,
+  EventItem,
   LocalBackend,
   Settings,
   Site,
@@ -31,24 +32,323 @@ const emptyState: AppState = {
   settings: null,
 };
 
-const statusLabels: Record<string, { label: string; tone: string }> = {
-  waiting: { label: "確認待ち", tone: "neutral" },
-  checking: { label: "確認中", tone: "working" },
-  baseline: { label: "監視中", tone: "good" },
-  unchanged: { label: "変化なし", tone: "good" },
-  changed: { label: "更新あり", tone: "changed" },
-  error: { label: "要確認", tone: "error" },
-  paused: { label: "一時停止", tone: "neutral" },
+const STATUS_TONE: Record<string, string> = {
+  waiting: "neutral",
+  checking: "working",
+  baseline: "good",
+  unchanged: "good",
+  changed: "changed",
+  error: "error",
+  paused: "neutral",
 };
 
 const SOURCE_KEY = "pagewatch-source";
 const ADMIN_KEY = "pagewatch-admin";
+const LANG_KEY = "pagewatch-lang";
 const DOWNLOAD_URL = "https://github.com/t-shiokawa1/Page-Watch/archive/refs/heads/main.zip";
 const TOKEN_URL = "https://github.com/settings/personal-access-tokens/new";
 
+type Lang = "ja" | "en";
+
+// All user-facing copy lives here so the whole UI can switch between Japanese
+// and English from one toggle, instead of showing both languages at once.
+const T = {
+  ja: {
+    home: "PageWatch ホーム",
+    srcAria: "監視の実行場所",
+    srcLocal: "このMac",
+    srcCloud: "クラウド",
+    langAria: "言語を切り替え",
+    settings: "設定",
+    close: "閉じる",
+    addKicker: "新規追加",
+    addTitle: "サイトを追加",
+    fUrl: "サイトURL",
+    fName: "表示名",
+    optional: "任意",
+    phName: "ニュース",
+    fInterval: "確認間隔",
+    addBtn: "監視を始める",
+    addBtnBusy: "追加中",
+    statTotal: "登録",
+    statActive: "監視中",
+    statChanged: "更新あり",
+    statErrors: "エラー",
+    watchKicker: "監視中",
+    watchTitle: "監視リスト",
+    checkAll: "すべて確認",
+    loadingList: "読み込んでいます",
+    emptyList: "最初の監視サイトを上のフォームから追加してください。",
+    lastChecked: "最終確認",
+    checkNow: "今すぐ確認",
+    pause: "一時停止",
+    resume: "再開",
+    del: "削除",
+    renameHint: "クリックで表示名を変更",
+    tRenamed: "表示名を変更しました。",
+    chartKicker: "変化の記録",
+    chartTitle: "変化の推移",
+    chartUnit: "件 / 14日",
+    chartEmpty: "まだ変化は検知されていません。",
+    chartSub: (n: number) => `サイト別・1日あたりの検知回数（最大 ${n} 件/日）`,
+    today: "今日",
+    histKicker: "最近の動き",
+    histTitle: "更新履歴",
+    histEmpty: "確認結果がここに記録されます。",
+    evChanged: "更新",
+    evError: "エラー",
+    evBaseline: "開始",
+    evNotify: "通知",
+    notChecked: "まだ確認していません",
+    footerCloud: "監視リストと履歴は、あなただけがアクセスできる非公開リポジトリに保存されます。",
+    footerLocal: "あなたの監視データは、このMacから外へ保存されません。",
+    footerSrcCloud: "クラウド",
+    footerSrcLocal: "このMacのみ",
+    top: "TOP ↑",
+    status: {
+      waiting: "確認待ち",
+      checking: "確認中",
+      baseline: "監視中",
+      unchanged: "変化なし",
+      changed: "更新あり",
+      error: "要確認",
+      paused: "一時停止",
+    } as Record<string, string>,
+    tAddCloud: "クラウドの監視リストに追加しました。初回チェックを開始します。",
+    tAddLocal: "監視サイトを追加しました。最初の比較基準を作成します。",
+    confirmDelete: (name: string) => `「${name}」と更新履歴を削除しますか？`,
+    tDeleted: "監視サイトを削除しました。",
+    tIntervalChanged: "確認間隔を変更しました。",
+    tTokenSaved: "トークンを保存しました。",
+    tTokenRemoved: "トークンを削除しました。",
+    tSettingsSaved: "通知設定を保存しました。",
+    tTestSent: "テストメールを送信しました。",
+    tConnErr: "接続できません",
+    tActionErr: "処理に失敗しました",
+    tBadUrl: "http:// または https:// で始まるURLを入力してください。",
+    tDupUrl: "このURLはすでに登録されています。",
+    every: (label: string) => `${label}ごと`,
+    // setup: local offline
+    loKicker: "はじめに / このMacで監視",
+    loTitle: "このMacの監視プログラムが起動していません",
+    loLead:
+      "「このMac」モードは、あなたのMac上で動く小さなプログラムが監視します。まだ入っていない場合は、次の手順で始めてください（データはこのMacの外に出ません）。",
+    loStep1: "下のボタンからアプリ一式（ZIP）をダウンロードします。",
+    loStep2a: "ダウンロードした ",
+    loStep2b: " をダブルクリックして展開します。",
+    loStep3a: "できたフォルダの中の ",
+    loStep3b: " をダブルクリックします。",
+    loStep4head: "「\"start.command\" is not opened / 開けませんでした」と出た場合",
+    loStep4note: "（初回のみ）：",
+    loStep4a: "① 「ゴミ箱に入れる」は押さず「完了（Done）」を押す",
+    loStep4b: "② Appleメニュー →「システム設定」→「プライバシーとセキュリティ」を開く",
+    loStep4c: "③ 下の方の「このまま開く（Open Anyway）」を押し、Touch IDまたはパスワードで承認",
+    loStep4d: "④ もう一度 start.command をダブルクリック →「開く」",
+    loStep5: "この画面に戻り、下のボタンで再読み込みすると監視リストが表示されます。",
+    loStep5note: "macOS標準のPython3で動きます。起動に数十秒かかることがあります。",
+    loDownload: "アプリをダウンロード（ZIP）",
+    reload: "再読み込み",
+    loAltSummary: "うまくいかないとき（ターミナルで解除）",
+    loAltP1:
+      "ターミナルを開き、次を入力して最後に半角スペースを打ち、展開したフォルダをウインドウにドラッグ＆ドロップしてEnter：",
+    loAltDrag: "（ここにフォルダをドラッグ）",
+    loAltP2a: "その後 ",
+    loAltP2b: " をダブルクリックすれば開きます。",
+    // setup: cloud token
+    ctKicker: "はじめに / クラウドで監視",
+    ctTitle: "クラウド監視を使うには、最初に1回だけ設定が必要です",
+    ctLead:
+      "「クラウド」モードは、Macを閉じていても監視を続けます。あなたのGitHubアカウントで、専用の合言葉（トークン）を1つ作って貼り付けてください。",
+    ctStep1: "下のボタンでGitHubのトークン作成画面を開きます。",
+    ctStep1note: "Repository access は pagewatch-data のみ、Permissions は Contents と Actions を「Read and write」に。",
+    ctStep2: "作成された文字列（github_pat_…）をコピーします。",
+    ctStep3: "「トークンを入力」ボタンから貼り付けて保存します。",
+    ctStep3note: "このブラウザにだけ保存されます。",
+    ctCreate: "トークンを作成（GitHub）",
+    ctEnter: "トークンを入力",
+    // cloud dialog
+    cdKicker: "設定",
+    cdTitle: "クラウド設定",
+    cdTokenLabel: "GitHubアクセストークン",
+    cdNote1:
+      "このブラウザにのみ保存されます。GitHubの「Settings → Developer settings → Fine-grained tokens」で、リポジトリ pagewatch-data だけを対象に Contents（Read and write）と Actions（Read and write）を許可したトークンを作成してください。",
+    cdNote2:
+      "メール通知は pagewatch-data リポジトリの Settings → Secrets and variables → Actions に SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / EMAIL_TO を登録すると有効になります。",
+    save: "保存",
+    // notification dialog
+    ndKicker: "通知",
+    ndTitle: "通知設定",
+    ndDesktop: "macOS通知",
+    ndDesktopNote: "更新時に通知センターへ表示",
+    ndEmail: "メール通知",
+    ndEmailNote: "SMTPを使って指定先へ送信",
+    ndTo: "通知先メールアドレス",
+    ndHost: "SMTPホスト",
+    ndPort: "ポート",
+    ndUser: "ユーザー名",
+    ndPassword: "パスワード",
+    ndPasswordSaved: "（保存済み・空欄なら変更なし）",
+    ndFrom: "送信元",
+    ndFromNote: "空欄ならユーザー名",
+    ndSsl: "SSL接続を使用（通常の587番ではオフ）",
+    ndTest: "テスト送信",
+    ndSave: "設定を保存",
+  },
+  en: {
+    home: "PageWatch home",
+    srcAria: "Where checks run",
+    srcLocal: "This Mac",
+    srcCloud: "Cloud",
+    langAria: "Switch language",
+    settings: "Settings",
+    close: "Close",
+    addKicker: "Add a watch",
+    addTitle: "Add a site",
+    fUrl: "Site URL",
+    fName: "Display name",
+    optional: "optional",
+    phName: "News",
+    fInterval: "Check interval",
+    addBtn: "Start watching",
+    addBtnBusy: "Adding",
+    statTotal: "Sites",
+    statActive: "Active",
+    statChanged: "Changed",
+    statErrors: "Errors",
+    watchKicker: "Watching now",
+    watchTitle: "Watch list",
+    checkAll: "Check all",
+    loadingList: "Loading",
+    emptyList: "Add your first site from the form above.",
+    lastChecked: "Last checked",
+    checkNow: "Check now",
+    pause: "Pause",
+    resume: "Resume",
+    del: "Delete",
+    renameHint: "Click to rename",
+    tRenamed: "Display name updated.",
+    chartKicker: "Change activity",
+    chartTitle: "Changes over time",
+    chartUnit: "in 14 days",
+    chartEmpty: "No changes detected yet.",
+    chartSub: (n: number) => `Detections per day by site (max ${n}/day)`,
+    today: "Today",
+    histKicker: "Recent activity",
+    histTitle: "Recent updates",
+    histEmpty: "Check results will appear here.",
+    evChanged: "Changed",
+    evError: "Error",
+    evBaseline: "Started",
+    evNotify: "Notified",
+    notChecked: "Not checked yet",
+    footerCloud: "Your watch list and history are stored in a private repository only you can access.",
+    footerLocal: "Your monitoring data is never stored outside this Mac.",
+    footerSrcCloud: "CLOUD",
+    footerSrcLocal: "LOCAL ONLY",
+    top: "TOP ↑",
+    status: {
+      waiting: "Waiting",
+      checking: "Checking",
+      baseline: "Watching",
+      unchanged: "No change",
+      changed: "Changed",
+      error: "Check needed",
+      paused: "Paused",
+    } as Record<string, string>,
+    tAddCloud: "Added to the cloud watch list. Running the first check now.",
+    tAddLocal: "Site added. Creating the first baseline for comparison.",
+    confirmDelete: (name: string) => `Delete “${name}” and its update history?`,
+    tDeleted: "Site removed.",
+    tIntervalChanged: "Check interval updated.",
+    tTokenSaved: "Token saved.",
+    tTokenRemoved: "Token removed.",
+    tSettingsSaved: "Notification settings saved.",
+    tTestSent: "Test email sent.",
+    tConnErr: "Can't connect.",
+    tActionErr: "Something went wrong.",
+    tBadUrl: "Enter a URL that starts with http:// or https://.",
+    tDupUrl: "This URL is already registered.",
+    every: (label: string) => `every ${label}`,
+    // setup: local offline
+    loKicker: "Get started / This Mac",
+    loTitle: "The monitoring program on this Mac isn't running",
+    loLead:
+      "“This Mac” mode is powered by a small program running on your Mac. If it isn't set up yet, follow these steps (your data never leaves this Mac).",
+    loStep1: "Download the app bundle (ZIP) with the button below.",
+    loStep2a: "Double-click the downloaded ",
+    loStep2b: " to unzip it.",
+    loStep3a: "Double-click ",
+    loStep3b: " inside the resulting folder.",
+    loStep4head: "If you see “\"start.command\" is not opened”",
+    loStep4note: " (first time only):",
+    loStep4a: "① Click “Done” — do NOT click “Move to Trash”",
+    loStep4b: "② Apple menu → System Settings → Privacy & Security",
+    loStep4c: "③ Click “Open Anyway” near the bottom and approve with Touch ID or your password",
+    loStep4d: "④ Double-click start.command again → “Open”",
+    loStep5: "Come back to this screen and click Reload below to see your watch list.",
+    loStep5note: "It runs on the Python 3 that ships with macOS. Startup can take a few tens of seconds.",
+    loDownload: "Download the app (ZIP)",
+    reload: "Reload",
+    loAltSummary: "If it still won't open (unlock via Terminal)",
+    loAltP1:
+      "Open Terminal, type the following, add a trailing space, then drag the unzipped folder onto the window and press Enter:",
+    loAltDrag: "(drag the folder here)",
+    loAltP2a: "Then double-click ",
+    loAltP2b: " to open it.",
+    // setup: cloud token
+    ctKicker: "Get started / Cloud",
+    ctTitle: "Cloud monitoring needs a one-time setup",
+    ctLead:
+      "“Cloud” mode keeps watching even while your Mac is closed. Create one access token (a passphrase) on your GitHub account and paste it in.",
+    ctStep1: "Open GitHub's token creation screen with the button below.",
+    ctStep1note: "Repository access: pagewatch-data only. Permissions: set Contents and Actions to “Read and write”.",
+    ctStep2: "Copy the generated string (github_pat_…).",
+    ctStep3: "Paste and save it via the “Enter token” button.",
+    ctStep3note: "It is stored only in this browser.",
+    ctCreate: "Create a token (GitHub)",
+    ctEnter: "Enter token",
+    // cloud dialog
+    cdKicker: "Settings",
+    cdTitle: "Cloud settings",
+    cdTokenLabel: "GitHub access token",
+    cdNote1:
+      "Stored only in this browser. In GitHub's Settings → Developer settings → Fine-grained tokens, create a token scoped to only the pagewatch-data repository, with Contents (Read and write) and Actions (Read and write).",
+    cdNote2:
+      "Email notifications turn on when you add SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / EMAIL_TO under the pagewatch-data repository's Settings → Secrets and variables → Actions.",
+    save: "Save",
+    // notification dialog
+    ndKicker: "Notifications",
+    ndTitle: "Notifications",
+    ndDesktop: "macOS notifications",
+    ndDesktopNote: "Show in Notification Center on changes",
+    ndEmail: "Email notifications",
+    ndEmailNote: "Send via SMTP to the address below",
+    ndTo: "Notification email address",
+    ndHost: "SMTP host",
+    ndPort: "Port",
+    ndUser: "Username",
+    ndPassword: "Password",
+    ndPasswordSaved: "(saved — leave blank to keep)",
+    ndFrom: "From",
+    ndFromNote: "defaults to username",
+    ndSsl: "Use SSL (off for the usual port 587)",
+    ndTest: "Send test",
+    ndSave: "Save settings",
+  },
+};
+
+type Dict = (typeof T)["ja"];
+
+function detectLang(): Lang {
+  const saved = localStorage.getItem(LANG_KEY);
+  if (saved === "ja" || saved === "en") return saved;
+  return navigator.language.toLowerCase().startsWith("ja") ? "ja" : "en";
+}
+
 // Cloud mode writes to the owner's private data repo, so only the owner can use
-// it. Regular visitors see only "このMac". The owner unlocks the cloud toggle by
-// opening the page once with ?admin (persisted per-browser); locking is via ?admin=off.
+// it. Regular visitors see only the local option. The owner unlocks the cloud
+// toggle by opening the page once with ?admin (persisted per-browser); locking
+// is via ?admin=off.
 function detectAdmin(): boolean {
   const params = new URLSearchParams(window.location.search);
   if (params.has("admin")) {
@@ -70,9 +370,9 @@ function defaultSource(isAdmin: boolean): SourceKind {
   return window.location.hostname.endsWith("github.io") ? "cloud" : "local";
 }
 
-function formatDate(value: string | null): string {
-  if (!value) return "まだ確認していません";
-  return new Intl.DateTimeFormat("ja-JP", {
+function formatDate(value: string | null, lang: Lang, t: Dict): string {
+  if (!value) return t.notChecked;
+  return new Intl.DateTimeFormat(lang === "ja" ? "ja-JP" : "en-US", {
     month: "numeric",
     day: "numeric",
     hour: "2-digit",
@@ -88,18 +388,164 @@ function hostname(url: string): string {
   }
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const value = statusLabels[status] || statusLabels.waiting;
+// Human-readable interval, computed from minutes so it localizes without
+// depending on the backend's (Japanese) choice labels.
+function fmtInterval(minutes: number, lang: Lang): string {
+  if (minutes % 60 === 0) {
+    const h = minutes / 60;
+    return lang === "ja" ? `${h}時間` : `${h} ${h === 1 ? "hour" : "hours"}`;
+  }
+  return lang === "ja" ? `${minutes}分` : `${minutes} min`;
+}
+
+function StatusBadge({ status, t }: { status: string; t: Dict }) {
+  const tone = STATUS_TONE[status] || "neutral";
+  const label = t.status[status] || t.status.waiting;
   return (
-    <span className={`status-badge status-${value.tone}`}>
+    <span className={`status-badge status-${tone}`}>
       <span className="status-dot" />
-      {value.label}
+      {label}
     </span>
+  );
+}
+
+// Where a site's favicon might live, most specific first. Project pages served
+// from a subpath (e.g. github.io/Repo/) keep their icon under that path, not at
+// the domain root, so try the URL's directory before falling back to the root.
+function faviconCandidates(rawUrl: string): string[] {
+  try {
+    const u = new URL(rawUrl);
+    const dir = u.pathname.replace(/[^/]*$/, ""); // strip the last path segment
+    const names = ["favicon.ico", "favicon.svg", "apple-touch-icon.png", "favicon.png"];
+    const bases: string[] = [];
+    if (dir && dir !== "/") bases.push(`${u.origin}${dir}`);
+    bases.push(`${u.origin}/`);
+    return bases.flatMap((base) => names.map((n) => base + n));
+  } catch {
+    return [];
+  }
+}
+
+// The site's own favicon (never a third-party service, to match the app's
+// "your data stays here" promise). Falls back to the name's first letter.
+function SiteIcon({ site }: { site: Site }) {
+  const candidates = useMemo(() => faviconCandidates(site.url), [site.url]);
+  const [idx, setIdx] = useState(0);
+  useEffect(() => setIdx(0), [site.url]);
+  const letter = (site.name.trim() || hostname(site.url)).charAt(0).toUpperCase();
+  if (idx >= candidates.length) {
+    return <div className="site-monogram" aria-hidden="true">{letter}</div>;
+  }
+  return (
+    <div className="site-favicon" aria-hidden="true">
+      <img
+        src={candidates[idx]}
+        alt=""
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setIdx((i) => i + 1)}
+      />
+    </div>
+  );
+}
+
+const DAY_MS = 86_400_000;
+const SERIES_COLORS = ["#ff6b3d", "#3868ff", "#51a53e", "#a24bff", "#e0a400", "#d6336c", "#0f9b8e"];
+
+// Per-site line chart of how many changes were detected each day over the last
+// two weeks. Events are the only time series we keep, so we bucket "changed"
+// events by site and day; each monitored site that changed gets its own line.
+function ActivityChart({ events, t }: { events: EventItem[]; t: Dict }) {
+  const days = 14;
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const startMs = start.getTime() - (days - 1) * DAY_MS;
+
+  const bySite = new Map<number, { name: string; counts: number[]; total: number }>();
+  for (const event of events) {
+    if (event.kind !== "changed") continue;
+    const time = new Date(event.created_at);
+    time.setHours(0, 0, 0, 0);
+    const idx = Math.round((time.getTime() - startMs) / DAY_MS);
+    if (idx < 0 || idx >= days) continue;
+    let entry = bySite.get(event.site_id);
+    if (!entry) {
+      entry = { name: event.site_name, counts: Array<number>(days).fill(0), total: 0 };
+      bySite.set(event.site_id, entry);
+    }
+    entry.counts[idx] += 1;
+    entry.total += 1;
+  }
+
+  const series = [...bySite.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([id, entry], i) => ({ id, ...entry, color: SERIES_COLORS[i % SERIES_COLORS.length] }));
+
+  const total = series.reduce((sum, s) => sum + s.total, 0);
+  const maxY = Math.max(1, ...series.flatMap((s) => s.counts));
+
+  // viewBox space; strokes use non-scaling-stroke so they stay crisp at any width.
+  const W = 560, H = 190, padL = 12, padR = 12, padT = 12, padB = 12;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const px = (i: number) => padL + (i / (days - 1)) * plotW;
+  const py = (v: number) => padT + plotH - (v / maxY) * plotH;
+  const dateLabel = (i: number) => {
+    const d = new Date(startMs + i * DAY_MS);
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  };
+
+  return (
+    <section className="chart-card" aria-labelledby="chart-title">
+      <div className="chart-head">
+        <div><p className="eyebrow">{t.chartKicker}</p><h2 id="chart-title">{t.chartTitle}</h2></div>
+        <span className="chart-total">{total}<small>{t.chartUnit}</small></span>
+      </div>
+
+      {total === 0 ? (
+        <p className="chart-empty">{t.chartEmpty}</p>
+      ) : (
+        <>
+          <p className="chart-sub">{t.chartSub(maxY)}</p>
+          <svg className="line-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={t.chartSub(maxY)}>
+            <line className="grid-line" x1={padL} y1={py(0)} x2={W - padR} y2={py(0)} vectorEffect="non-scaling-stroke" />
+            <line className="grid-line grid-top" x1={padL} y1={py(maxY)} x2={W - padR} y2={py(maxY)} vectorEffect="non-scaling-stroke" />
+            {series.map((s) => (
+              <g key={s.id}>
+                <polyline
+                  className="series-line"
+                  points={s.counts.map((v, i) => `${px(i)},${py(v)}`).join(" ")}
+                  style={{ stroke: s.color }}
+                  vectorEffect="non-scaling-stroke"
+                />
+                {s.counts.map((v, i) =>
+                  v > 0 ? <circle key={i} r={3.5} cx={px(i)} cy={py(v)} style={{ fill: s.color }} /> : null,
+                )}
+              </g>
+            ))}
+          </svg>
+          <div className="chart-axis">
+            <span>{dateLabel(0)}</span>
+            <span>{dateLabel(Math.floor((days - 1) / 2))}</span>
+            <span>{t.today}</span>
+          </div>
+          <div className="chart-legend">
+            {series.map((s) => (
+              <span key={s.id} className="legend-item">
+                <i style={{ background: s.color }} />{s.name}<b>{s.total}</b>
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
 function App() {
   const [isAdmin] = useState(detectAdmin);
+  const [lang, setLang] = useState<Lang>(detectLang);
+  const t = T[lang];
   const [source, setSource] = useState<SourceKind>(() => defaultSource(isAdmin));
   const backend: Backend = useMemo(
     () => (source === "cloud" ? new CloudBackend() : new LocalBackend()),
@@ -118,6 +564,19 @@ function App() {
   const [tokenDraft, setTokenDraft] = useState("");
   const [hasToken, setHasToken] = useState(() => !!getCloudToken());
   const [connError, setConnError] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+
+  const toggleLang = () => {
+    const next: Lang = lang === "ja" ? "en" : "ja";
+    localStorage.setItem(LANG_KEY, next);
+    document.documentElement.lang = next;
+    setLang(next);
+  };
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
 
   const loadState = useCallback(
     async (quiet = false) => {
@@ -132,12 +591,12 @@ function App() {
         }
       } catch (error) {
         setConnError(true);
-        if (!quiet) setMessage(error instanceof Error ? error.message : "接続できません");
+        if (!quiet) setMessage(error instanceof Error ? error.message : t.tConnErr);
       } finally {
         setLoading(false);
       }
     },
-    [backend],
+    [backend, t],
   );
 
   // What the person needs to do before this mode can work.
@@ -184,7 +643,7 @@ function App() {
       if (typeof result === "string") showMessage(result);
       if (reload) await loadState();
     } catch (error) {
-      showMessage(error instanceof Error ? error.message : "処理に失敗しました");
+      showMessage(error instanceof Error ? error.message : t.tActionErr);
     } finally {
       setBusy(null);
     }
@@ -192,21 +651,56 @@ function App() {
 
   const addSite = (event: FormEvent) => {
     event.preventDefault();
+    // Validate on the client for both backends so the URL rules and messages
+    // are identical whether the check runs locally or in the cloud.
+    const trimmedUrl = url.trim();
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmedUrl);
+    } catch {
+      showMessage(t.tBadUrl);
+      return;
+    }
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      showMessage(t.tBadUrl);
+      return;
+    }
+    if (state.sites.some((s) => s.url === trimmedUrl)) {
+      showMessage(t.tDupUrl);
+      return;
+    }
     run("add", async () => {
-      await backend.addSite({ name, url, interval_minutes: interval });
+      await backend.addSite({ name, url: trimmedUrl, interval_minutes: interval });
       setName("");
       setUrl("");
-      return backend.kind === "cloud"
-        ? "クラウドの監視リストに追加しました。初回チェックを開始します。"
-        : "監視サイトを追加しました。最初の比較基準を作成します。";
+      return backend.kind === "cloud" ? t.tAddCloud : t.tAddLocal;
     });
   };
 
   const deleteSite = (site: Site) => {
-    if (!window.confirm(`「${site.name}」と更新履歴を削除しますか？`)) return;
+    if (!window.confirm(t.confirmDelete(site.name))) return;
     run(`delete-${site.id}`, async () => {
       await backend.deleteSite(site);
-      return "監視サイトを削除しました。";
+      return t.tDeleted;
+    });
+  };
+
+  const startRename = (site: Site) => {
+    setEditingId(site.id);
+    setEditName(site.name);
+  };
+
+  const commitRename = (site: Site) => {
+    // Escape and Enter both clear editingId synchronously, so a stray blur that
+    // fires afterwards would otherwise re-commit (double save) or resurrect a
+    // cancelled edit. Bail out unless this row is still the one being edited.
+    if (editingId !== site.id) return;
+    const value = editName.trim();
+    setEditingId(null);
+    if (!value || value === site.name) return;
+    run(`rename-${site.id}`, async () => {
+      await backend.renameSite(site, value);
+      return t.tRenamed;
     });
   };
 
@@ -225,7 +719,7 @@ function App() {
     setCloudToken(tokenDraft);
     setHasToken(!!tokenDraft.trim());
     cloudDialog.current?.close();
-    showMessage(tokenDraft ? "トークンを保存しました。" : "トークンを削除しました。");
+    showMessage(tokenDraft ? t.tTokenSaved : t.tTokenRemoved);
     loadState();
   };
 
@@ -238,7 +732,7 @@ function App() {
       const saved = await local.saveSettings(settings);
       setSettings({ ...saved, smtp_password: "" });
       settingsDialog.current?.close();
-      return "通知設定を保存しました。";
+      return t.tSettingsSaved;
     });
   };
 
@@ -249,7 +743,7 @@ function App() {
         if (!local) return;
         await local.saveSettings(settings);
         await local.testEmail();
-        return "テストメールを送信しました。";
+        return t.tTestSent;
       },
       false,
     );
@@ -258,20 +752,20 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="PageWatch ホーム">
+        <a className="brand" href="#top" aria-label={t.home}>
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
           <span>PAGEWATCH</span>
         </a>
         <div className="top-actions">
           {isAdmin && (
-            <div className="source-toggle" role="tablist" aria-label="監視の実行場所">
+            <div className="source-toggle" role="tablist" aria-label={t.srcAria}>
               <button
                 role="tab"
                 aria-selected={source === "local"}
                 className={source === "local" ? "source-active" : ""}
                 onClick={() => switchSource("local")}
               >
-                このMac
+                {t.srcLocal}
               </button>
               <button
                 role="tab"
@@ -279,11 +773,14 @@ function App() {
                 className={source === "cloud" ? "source-active" : ""}
                 onClick={() => switchSource("cloud")}
               >
-                クラウド
+                {t.srcCloud}
               </button>
             </div>
           )}
-          <button className="icon-button" onClick={openSettings} aria-label="設定" title="設定">
+          <button className="lang-button" onClick={toggleLang} aria-label={t.langAria}>
+            {lang === "ja" ? "EN" : "日本語"}
+          </button>
+          <button className="icon-button" onClick={openSettings} aria-label={t.settings} title={t.settings}>
             ⚙
           </button>
         </div>
@@ -291,63 +788,55 @@ function App() {
 
       <main id="top">
         {setupNeeded === "local-offline" && (
-          <section className="setup-card" aria-label="このMacで監視を始める手順">
-            <p className="eyebrow">はじめに / このMacで監視</p>
-            <h2>このMacの監視プログラムが起動していません</h2>
-            <p className="setup-lead">
-              「このMac」モードは、あなたのMac上で動く小さなプログラムが監視します。
-              まだ入っていない場合は、次の手順で始めてください（データはこのMacの外に出ません）。
-            </p>
+          <section className="setup-card" aria-label={t.loTitle}>
+            <p className="eyebrow">{t.loKicker}</p>
+            <h2>{t.loTitle}</h2>
+            <p className="setup-lead">{t.loLead}</p>
             <ol>
-              <li>下のボタンからアプリ一式（ZIP）をダウンロードします。</li>
-              <li>ダウンロードした <code>Page-Watch-main.zip</code> をダブルクリックして展開します。</li>
-              <li>できたフォルダの中の <code>start.command</code> をダブルクリックします。</li>
+              <li>{t.loStep1}</li>
+              <li>{t.loStep2a}<code>Page-Watch-main.zip</code>{t.loStep2b}</li>
+              <li>{t.loStep3a}<code>start.command</code>{t.loStep3b}</li>
               <li>
-                <strong>「"start.command" is not opened / 開けませんでした」と出た場合</strong>（初回のみ）：
-                <small>① <strong>「ゴミ箱に入れる」は押さず</strong>「完了（Done）」を押す</small>
-                <small>② Appleメニュー →「システム設定」→「プライバシーとセキュリティ」を開く</small>
-                <small>③ 下の方の「このまま開く（Open Anyway）」を押し、Touch IDまたはパスワードで承認</small>
-                <small>④ もう一度 <code>start.command</code> をダブルクリック →「開く」</small>
+                <strong>{t.loStep4head}</strong>{t.loStep4note}
+                <small>{t.loStep4a}</small>
+                <small>{t.loStep4b}</small>
+                <small>{t.loStep4c}</small>
+                <small>{t.loStep4d}</small>
               </li>
               <li>
-                この画面に戻り、下のボタンで再読み込みすると監視リストが表示されます。
-                <small>macOS標準のPython3で動きます。起動に数十秒かかることがあります。</small>
+                {t.loStep5}
+                <small>{t.loStep5note}</small>
               </li>
             </ol>
             <div className="setup-actions">
-              <a className="setup-button" href={DOWNLOAD_URL}>アプリをダウンロード（ZIP）</a>
+              <a className="setup-button" href={DOWNLOAD_URL}>{t.loDownload}</a>
               <button className="secondary-button" onClick={() => run("reload", () => loadState(), false)}>
-                <span className={busy === "reload" ? "spin" : ""}>↻</span> 再読み込み
+                <span className={busy === "reload" ? "spin" : ""}>↻</span> {t.reload}
               </button>
             </div>
             <details className="setup-alt">
-              <summary>うまくいかないとき（ターミナルで解除）</summary>
-              <p>
-                ターミナルを開き、次を入力して最後に半角スペースを打ち、展開したフォルダをウインドウにドラッグ＆ドロップしてEnter：
-              </p>
-              <p><code>xattr -dr com.apple.quarantine </code>（ここにフォルダをドラッグ）</p>
-              <p>その後 <code>start.command</code> をダブルクリックすれば開きます。</p>
+              <summary>{t.loAltSummary}</summary>
+              <p>{t.loAltP1}</p>
+              <p><code>xattr -dr com.apple.quarantine </code>{t.loAltDrag}</p>
+              <p>{t.loAltP2a}<code>start.command</code>{t.loAltP2b}</p>
             </details>
           </section>
         )}
         {setupNeeded === "cloud-token" && (
-          <section className="setup-card" aria-label="クラウドで監視を始める手順">
-            <p className="eyebrow">はじめに / クラウドで監視</p>
-            <h2>クラウド監視を使うには、最初に1回だけ設定が必要です</h2>
-            <p className="setup-lead">
-              「クラウド」モードは、Macを閉じていても監視を続けます。
-              あなたのGitHubアカウントで、専用の合言葉（トークン）を1つ作って貼り付けてください。
-            </p>
+          <section className="setup-card" aria-label={t.ctTitle}>
+            <p className="eyebrow">{t.ctKicker}</p>
+            <h2>{t.ctTitle}</h2>
+            <p className="setup-lead">{t.ctLead}</p>
             <ol>
               <li>
-                下のボタンでGitHubのトークン作成画面を開きます。
-                <small>Repository access は <code>pagewatch-data</code> のみ、Permissions は Contents と Actions を「Read and write」に。</small>
+                {t.ctStep1}
+                <small>{t.ctStep1note}</small>
               </li>
-              <li>作成された文字列（<code>github_pat_…</code>）をコピーします。</li>
-              <li>「トークンを入力」ボタンから貼り付けて保存します。<small>このブラウザにだけ保存されます。</small></li>
+              <li>{t.ctStep2}</li>
+              <li>{t.ctStep3}<small>{t.ctStep3note}</small></li>
             </ol>
             <div className="setup-actions">
-              <a className="setup-button" href={TOKEN_URL} target="_blank" rel="noreferrer">トークンを作成（GitHub）</a>
+              <a className="setup-button" href={TOKEN_URL} target="_blank" rel="noreferrer">{t.ctCreate}</a>
               <button
                 className="secondary-button"
                 onClick={() => {
@@ -355,27 +844,23 @@ function App() {
                   cloudDialog.current?.showModal();
                 }}
               >
-                トークンを入力
+                {t.ctEnter}
               </button>
             </div>
           </section>
         )}
-        <section className="add-panel add-panel-first" aria-labelledby="add-title">
-          <div className="section-index">01</div>
+        <div className="layout">
+        <aside className="side">
+        <section className="add-panel" aria-labelledby="add-title">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">ADD A WATCH</p>
-              <h2 id="add-title">監視するサイトを追加</h2>
+              <p className="eyebrow">{t.addKicker}</p>
+              <h2 id="add-title">{t.addTitle}</h2>
             </div>
-            <p>
-              {backend.kind === "cloud"
-                ? "クラウド（GitHub Actions）が定期チェックします。Macを閉じていても動きます。"
-                : "このMacが定期チェックします。データはこのMacの外へ出ません。"}
-            </p>
           </div>
           <form className="add-form" onSubmit={addSite}>
             <label className="field field-url">
-              <span>サイトURL</span>
+              <span>{t.fUrl}</span>
               <input
                 type="url"
                 value={url}
@@ -385,78 +870,114 @@ function App() {
               />
             </label>
             <label className="field field-name">
-              <span>表示名 <small>任意</small></span>
-              <input value={name} onChange={(event) => setName(event.target.value)} placeholder="研究室ニュース" />
+              <span>{t.fName} <small>{t.optional}</small></span>
+              <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t.phName} />
             </label>
             <label className="field field-interval">
-              <span>確認間隔</span>
+              <span>{t.fInterval}</span>
               <select value={interval} onChange={(event) => setIntervalValue(Number(event.target.value))}>
                 {backend.intervalChoices.map((choice) => (
-                  <option key={choice.value} value={choice.value}>{choice.label}</option>
+                  <option key={choice.value} value={choice.value}>{fmtInterval(choice.value, lang)}</option>
                 ))}
               </select>
             </label>
             <button className="primary-button" type="submit" disabled={busy === "add"}>
-              <span>{busy === "add" ? "追加中" : "監視を始める"}</span><b aria-hidden="true">↗</b>
+              <span>{busy === "add" ? t.addBtnBusy : t.addBtn}</span><b aria-hidden="true">↗</b>
             </button>
           </form>
         </section>
 
+        <div className="stats-grid">
+          <article><span>{t.statTotal}</span><strong>{state.summary.total}</strong></article>
+          <article><span>{t.statActive}</span><strong>{state.summary.active}</strong></article>
+          <article className={state.summary.changed ? "accent-stat" : ""}><span>{t.statChanged}</span><strong>{state.summary.changed}</strong></article>
+          <article className={state.summary.errors ? "error-stat" : ""}><span>{t.statErrors}</span><strong>{state.summary.errors}</strong></article>
+        </div>
+
+        <ActivityChart events={state.events} t={t} />
+        </aside>
+
+        <div className="content">
         <section className="dashboard-section" aria-labelledby="watch-title">
           <div className="section-title-row">
             <div className="title-with-index">
-              <span className="section-index">02</span>
-              <div><p className="eyebrow">WATCHING NOW</p><h2 id="watch-title">監視リスト</h2></div>
+              <div><p className="eyebrow">{t.watchKicker}</p><h2 id="watch-title">{t.watchTitle}</h2></div>
             </div>
             <button
               className="secondary-button"
               onClick={() => run("all", () => backend.checkAll(), false)}
               disabled={busy === "all"}
             >
-              <span className={busy === "all" ? "spin" : ""}>↻</span> すべて確認
+              <span className={busy === "all" ? "spin" : ""}>↻</span> {t.checkAll}
             </button>
-          </div>
-
-          <div className="stats-grid">
-            <article><span>登録</span><strong>{state.summary.total}</strong><small>SITES</small></article>
-            <article><span>監視中</span><strong>{state.summary.active}</strong><small>ACTIVE</small></article>
-            <article className={state.summary.changed ? "accent-stat" : ""}><span>更新あり</span><strong>{state.summary.changed}</strong><small>CHANGED</small></article>
-            <article className={state.summary.errors ? "error-stat" : ""}><span>エラー</span><strong>{state.summary.errors}</strong><small>ERRORS</small></article>
           </div>
 
           <div className="site-list" aria-live="polite">
             {loading ? (
-              <div className="empty-state"><span className="loader" /> 読み込んでいます</div>
+              <div className="empty-state"><span className="loader" /> {t.loadingList}</div>
             ) : state.sites.length === 0 ? (
-              <div className="empty-state">最初の監視サイトを上のフォームから追加してください。</div>
+              <div className="empty-state">{t.emptyList}</div>
             ) : state.sites.map((site) => (
               <article className={`site-row ${!site.enabled ? "site-paused" : ""}`} key={site.id}>
-                <div className="site-monogram" aria-hidden="true">{site.name.trim().charAt(0).toUpperCase()}</div>
+                <SiteIcon site={site} />
                 <div className="site-info">
-                  <div className="site-name-line"><h3>{site.name}</h3><StatusBadge status={site.status} /></div>
+                  <div className="site-name-line">
+                    {editingId === site.id ? (
+                      <input
+                        className="name-edit"
+                        value={editName}
+                        autoFocus
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitRename(site);
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                        onBlur={() => commitRename(site)}
+                        aria-label={t.fName}
+                      />
+                    ) : (
+                      <h3
+                        className="site-name"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => startRename(site)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            startRename(site);
+                          }
+                        }}
+                        title={t.renameHint}
+                        aria-label={`${site.name} — ${t.renameHint}`}
+                      >
+                        {site.name}
+                      </h3>
+                    )}
+                    <StatusBadge status={site.status} t={t} />
+                  </div>
                   <a href={site.url} target="_blank" rel="noreferrer">{hostname(site.url)} <span>↗</span></a>
                   {site.last_error && <p className="site-error">{site.last_error}</p>}
                 </div>
                 <div className="site-meta">
-                  <span>最終確認</span>
-                  <strong>{formatDate(site.last_checked)}</strong>
+                  <span>{t.lastChecked}</span>
+                  <strong>{formatDate(site.last_checked, lang, t)}</strong>
                   <select
                     className="interval-select"
                     value={site.interval_minutes}
                     onChange={(event) =>
                       run(`interval-${site.id}`, async () => {
                         await backend.setInterval(site, Number(event.target.value));
-                        return "確認間隔を変更しました。";
+                        return t.tIntervalChanged;
                       })
                     }
                     disabled={busy === `interval-${site.id}`}
-                    aria-label="確認間隔"
+                    aria-label={t.fInterval}
                   >
                     {backend.intervalChoices.map((choice) => (
-                      <option key={choice.value} value={choice.value}>{choice.label}ごと</option>
+                      <option key={choice.value} value={choice.value}>{t.every(fmtInterval(choice.value, lang))}</option>
                     ))}
                     {!backend.intervalChoices.some((c) => c.value === site.interval_minutes) && (
-                      <option value={site.interval_minutes}>{site.interval_minutes}分ごと</option>
+                      <option value={site.interval_minutes}>{t.every(fmtInterval(site.interval_minutes, lang))}</option>
                     )}
                   </select>
                 </div>
@@ -464,18 +985,20 @@ function App() {
                   <button
                     onClick={() => run(`check-${site.id}`, () => backend.checkSite(site))}
                     disabled={busy === `check-${site.id}` || !site.enabled}
-                    title="今すぐ確認"
+                    title={t.checkNow}
+                    aria-label={t.checkNow}
                   >
-                    <span className={busy === `check-${site.id}` ? "spin" : ""}>↻</span>
+                    <span className={busy === `check-${site.id}` ? "spin" : ""} aria-hidden="true">↻</span>
                   </button>
                   <button
                     onClick={() => run(`toggle-${site.id}`, () => backend.toggleSite(site))}
                     disabled={busy === `toggle-${site.id}`}
-                    title={site.enabled ? "一時停止" : "再開"}
+                    title={site.enabled ? t.pause : t.resume}
+                    aria-label={site.enabled ? t.pause : t.resume}
                   >
-                    {site.enabled ? "Ⅱ" : "▶"}
+                    <span aria-hidden="true">{site.enabled ? "Ⅱ" : "▶"}</span>
                   </button>
-                  <button className="danger-action" onClick={() => deleteSite(site)} disabled={busy === `delete-${site.id}`} title="削除">×</button>
+                  <button className="danger-action" onClick={() => deleteSite(site)} disabled={busy === `delete-${site.id}`} title={t.del} aria-label={t.del}><span aria-hidden="true">×</span></button>
                 </div>
               </article>
             ))}
@@ -484,48 +1007,45 @@ function App() {
 
         <section className="history-section" aria-labelledby="history-title">
           <div className="title-with-index">
-            <span className="section-index">03</span>
-            <div><p className="eyebrow">RECENT ACTIVITY</p><h2 id="history-title">更新履歴</h2></div>
+            <div><p className="eyebrow">{t.histKicker}</p><h2 id="history-title">{t.histTitle}</h2></div>
           </div>
           <div className="timeline">
             {state.events.length === 0 ? (
-              <p className="timeline-empty">確認結果がここに記録されます。</p>
-            ) : state.events.slice(0, 12).map((item) => (
+              <p className="timeline-empty">{t.histEmpty}</p>
+            ) : state.events.slice(0, 8).map((item) => (
               <article className="timeline-item" key={item.id}>
                 <span className={`timeline-mark mark-${item.kind}`} />
-                <time>{formatDate(item.created_at)}</time>
+                <time>{formatDate(item.created_at, lang, t)}</time>
                 <div>
                   <h3>{item.site_name}</h3>
                   <p>{item.summary}</p>
                 </div>
                 <span className="event-label">
-                  {item.kind === "changed" ? "更新" : item.kind === "error" ? "エラー" : item.kind === "baseline" ? "開始" : "通知"}
+                  {item.kind === "changed" ? t.evChanged : item.kind === "error" ? t.evError : item.kind === "baseline" ? t.evBaseline : t.evNotify}
                 </span>
               </article>
             ))}
           </div>
         </section>
+        </div>
+        </div>
       </main>
 
       <footer>
-        <span>PAGEWATCH / {source === "cloud" ? "CLOUD" : "LOCAL ONLY"}</span>
-        <p>
-          {source === "cloud"
-            ? "監視リストと履歴は、あなただけがアクセスできる非公開リポジトリに保存されます。"
-            : "あなたの監視データは、このMacから外へ保存されません。"}
-        </p>
-        <a href="#top">TOP ↑</a>
+        <span>PAGEWATCH / {source === "cloud" ? t.footerSrcCloud : t.footerSrcLocal}</span>
+        <p>{source === "cloud" ? t.footerCloud : t.footerLocal}</p>
+        <a href="#top">{t.top}</a>
       </footer>
 
       <dialog className="settings-dialog" ref={cloudDialog}>
         <form onSubmit={saveToken}>
           <div className="dialog-heading">
-            <div><p className="eyebrow">CLOUD</p><h2>クラウド設定</h2></div>
-            <button type="button" onClick={() => cloudDialog.current?.close()} aria-label="閉じる">×</button>
+            <div><p className="eyebrow">{t.cdKicker}</p><h2>{t.cdTitle}</h2></div>
+            <button type="button" onClick={() => cloudDialog.current?.close()} aria-label={t.close}>×</button>
           </div>
           <div className="email-fields">
             <label>
-              <span>GitHubアクセストークン</span>
+              <span>{t.cdTokenLabel}</span>
               <input
                 type="password"
                 value={tokenDraft}
@@ -533,21 +1053,11 @@ function App() {
                 placeholder="github_pat_..."
               />
             </label>
-            <p className="dialog-note">
-              このブラウザにのみ保存されます。GitHubの
-              「Settings → Developer settings → Fine-grained tokens」で、
-              リポジトリ <code>pagewatch-data</code> だけを対象に
-              Contents（Read and write）と Actions（Read and write）を許可した
-              トークンを作成してください。
-            </p>
-            <p className="dialog-note">
-              メール通知は <code>pagewatch-data</code> リポジトリの
-              Settings → Secrets and variables → Actions に
-              SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / EMAIL_TO を登録すると有効になります。
-            </p>
+            <p className="dialog-note">{t.cdNote1}</p>
+            <p className="dialog-note">{t.cdNote2}</p>
           </div>
           <div className="dialog-actions">
-            <button type="submit" className="primary-button"><span>保存</span><b>↗</b></button>
+            <button type="submit" className="primary-button"><span>{t.save}</span><b>↗</b></button>
           </div>
         </form>
       </dialog>
@@ -555,31 +1065,31 @@ function App() {
       <dialog className="settings-dialog" ref={settingsDialog} onClose={() => state.settings && setSettings({ ...state.settings, smtp_password: "" })}>
         <form onSubmit={saveEmailSettings}>
           <div className="dialog-heading">
-            <div><p className="eyebrow">NOTIFICATIONS</p><h2>通知設定</h2></div>
-            <button type="button" onClick={() => settingsDialog.current?.close()} aria-label="閉じる">×</button>
+            <div><p className="eyebrow">{t.ndKicker}</p><h2>{t.ndTitle}</h2></div>
+            <button type="button" onClick={() => settingsDialog.current?.close()} aria-label={t.close}>×</button>
           </div>
           <label className="toggle-row">
-            <span><strong>macOS通知</strong><small>更新時に通知センターへ表示</small></span>
+            <span><strong>{t.ndDesktop}</strong><small>{t.ndDesktopNote}</small></span>
             <input type="checkbox" checked={settings.desktop_notifications} onChange={(e) => setSettings({ ...settings, desktop_notifications: e.target.checked })} />
           </label>
           <label className="toggle-row">
-            <span><strong>メール通知</strong><small>SMTPを使って指定先へ送信</small></span>
+            <span><strong>{t.ndEmail}</strong><small>{t.ndEmailNote}</small></span>
             <input type="checkbox" checked={settings.email_enabled} onChange={(e) => setSettings({ ...settings, email_enabled: e.target.checked })} />
           </label>
           <div className={`email-fields ${!settings.email_enabled ? "fields-disabled" : ""}`}>
-            <label><span>通知先メールアドレス</span><input type="email" value={settings.email_to} onChange={(e) => setSettings({ ...settings, email_to: e.target.value })} disabled={!settings.email_enabled} /></label>
+            <label><span>{t.ndTo}</span><input type="email" value={settings.email_to} onChange={(e) => setSettings({ ...settings, email_to: e.target.value })} disabled={!settings.email_enabled} /></label>
             <div className="field-pair">
-              <label><span>SMTPホスト</span><input value={settings.smtp_host} placeholder="smtp.gmail.com" onChange={(e) => setSettings({ ...settings, smtp_host: e.target.value })} disabled={!settings.email_enabled} /></label>
-              <label><span>ポート</span><input type="number" value={settings.smtp_port} onChange={(e) => setSettings({ ...settings, smtp_port: Number(e.target.value) })} disabled={!settings.email_enabled} /></label>
+              <label><span>{t.ndHost}</span><input value={settings.smtp_host} placeholder="smtp.gmail.com" onChange={(e) => setSettings({ ...settings, smtp_host: e.target.value })} disabled={!settings.email_enabled} /></label>
+              <label><span>{t.ndPort}</span><input type="number" value={settings.smtp_port} onChange={(e) => setSettings({ ...settings, smtp_port: Number(e.target.value) })} disabled={!settings.email_enabled} /></label>
             </div>
-            <label><span>ユーザー名</span><input value={settings.smtp_user} onChange={(e) => setSettings({ ...settings, smtp_user: e.target.value })} disabled={!settings.email_enabled} /></label>
-            <label><span>パスワード {settings.smtp_password_set && <small>（保存済み・空欄なら変更なし）</small>}</span><input type="password" value={settings.smtp_password} onChange={(e) => setSettings({ ...settings, smtp_password: e.target.value })} disabled={!settings.email_enabled} /></label>
-            <label><span>送信元 <small>空欄ならユーザー名</small></span><input type="email" value={settings.smtp_from} onChange={(e) => setSettings({ ...settings, smtp_from: e.target.value })} disabled={!settings.email_enabled} /></label>
-            <label className="inline-check"><input type="checkbox" checked={settings.smtp_ssl} onChange={(e) => setSettings({ ...settings, smtp_ssl: e.target.checked })} disabled={!settings.email_enabled} /> SSL接続を使用（通常の587番ではオフ）</label>
+            <label><span>{t.ndUser}</span><input value={settings.smtp_user} onChange={(e) => setSettings({ ...settings, smtp_user: e.target.value })} disabled={!settings.email_enabled} /></label>
+            <label><span>{t.ndPassword} {settings.smtp_password_set && <small>{t.ndPasswordSaved}</small>}</span><input type="password" value={settings.smtp_password} onChange={(e) => setSettings({ ...settings, smtp_password: e.target.value })} disabled={!settings.email_enabled} /></label>
+            <label><span>{t.ndFrom} <small>{t.ndFromNote}</small></span><input type="email" value={settings.smtp_from} onChange={(e) => setSettings({ ...settings, smtp_from: e.target.value })} disabled={!settings.email_enabled} /></label>
+            <label className="inline-check"><input type="checkbox" checked={settings.smtp_ssl} onChange={(e) => setSettings({ ...settings, smtp_ssl: e.target.checked })} disabled={!settings.email_enabled} /> {t.ndSsl}</label>
           </div>
           <div className="dialog-actions">
-            <button type="button" className="secondary-button" onClick={testEmail} disabled={!settings.email_enabled || busy === "test-email"}>テスト送信</button>
-            <button type="submit" className="primary-button" disabled={busy === "settings"}><span>設定を保存</span><b>↗</b></button>
+            <button type="button" className="secondary-button" onClick={testEmail} disabled={!settings.email_enabled || busy === "test-email"}>{t.ndTest}</button>
+            <button type="submit" className="primary-button" disabled={busy === "settings"}><span>{t.ndSave}</span><b>↗</b></button>
           </div>
         </form>
       </dialog>

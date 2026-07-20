@@ -56,6 +56,7 @@ export interface Backend {
   toggleSite(site: Site): Promise<void>;
   deleteSite(site: Site): Promise<void>;
   setInterval(site: Site, minutes: number): Promise<void>;
+  renameSite(site: Site, name: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------- local ----
@@ -130,6 +131,13 @@ export class LocalBackend implements Backend {
     await localApi(`/api/sites/${site.id}`, {
       method: "PATCH",
       body: JSON.stringify({ interval_minutes: minutes }),
+    });
+  }
+
+  async renameSite(site: Site, name: string): Promise<void> {
+    await localApi(`/api/sites/${site.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
     });
   }
 
@@ -344,5 +352,11 @@ export class CloudBackend implements Backend {
       s.id === site.id ? { ...s, interval_minutes: Math.max(this.minInterval, minutes) } : s,
     );
     await writeSites(next, sha, `interval: ${site.name} -> ${minutes}min`);
+  }
+
+  async renameSite(site: Site, name: string): Promise<void> {
+    const { sites, sha } = await readSites();
+    const next = sites.map((s) => (s.id === site.id ? { ...s, name } : s));
+    await writeSites(next, sha, `rename: ${site.name} -> ${name}`);
   }
 }
