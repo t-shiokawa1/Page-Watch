@@ -56,7 +56,7 @@ type Lang = "ja" | "en";
 const T = {
   ja: {
     home: "PageWatch ホーム",
-    srcAria: "監視の実行場所",
+    srcAria: "モニターの実行場所",
     srcLocal: "このMac",
     srcCloud: "クラウド",
     langAria: "言語を切り替え",
@@ -69,19 +69,19 @@ const T = {
     optional: "任意",
     phName: "ニュース",
     fInterval: "確認間隔",
-    addBtn: "監視を始める",
+    addBtn: "モニターを始める",
     addBtnBusy: "追加中",
     statTotal: "登録",
-    statActive: "監視中",
+    statActive: "モニター中",
     statChanged: "更新あり",
     statErrors: "エラー",
-    watchKicker: "監視中",
-    watchTitle: "監視リスト",
+    watchKicker: "モニター中",
+    watchTitle: "モニターリスト",
     checkAll: "すべて確認",
     expandAria: "詳細を開閉",
     detailHistory: "このサイトの更新履歴",
     loadingList: "読み込んでいます",
-    emptyList: "最初の監視サイトを上のフォームから追加してください。",
+    emptyList: "最初のモニターサイトを上のフォームから追加してください。",
     lastChecked: "最終確認",
     checkNow: "今すぐ確認",
     pause: "一時停止",
@@ -111,15 +111,15 @@ const T = {
     evBaseline: "開始",
     evNotify: "通知",
     notChecked: "まだ確認していません",
-    footerCloud: "監視リストと履歴は、あなただけがアクセスできる非公開リポジトリに保存されます。",
-    footerLocal: "あなたの監視データは、このMacから外へ保存されません。",
+    footerCloud: "モニターリストと履歴は、あなただけがアクセスできる非公開リポジトリに保存されます。",
+    footerLocal: "あなたのモニターデータは、このMacから外へ保存されません。",
     footerSrcCloud: "クラウド",
     footerSrcLocal: "このMacのみ",
     top: "TOP ↑",
     status: {
       waiting: "確認待ち",
       checking: "確認中",
-      baseline: "監視中",
+      baseline: "モニター中",
       unchanged: "変化なし",
       changed: "更新あり",
       seen: "既読",
@@ -128,10 +128,10 @@ const T = {
     } as Record<string, string>,
     ackHint: "クリックで既読にする",
     ackAll: "すべて既読に",
-    tAddCloud: "クラウドの監視リストに追加しました。初回チェックを開始します。",
-    tAddLocal: "監視サイトを追加しました。最初の比較基準を作成します。",
+    tAddCloud: "クラウドのモニターリストに追加しました。初回チェックを開始します。",
+    tAddLocal: "モニターサイトを追加しました。最初の比較基準を作成します。",
     confirmDelete: (name: string) => `「${name}」と更新履歴を削除しますか？`,
-    tDeleted: "監視サイトを削除しました。",
+    tDeleted: "モニターサイトを削除しました。",
     tIntervalChanged: "確認間隔を変更しました。",
     tTokenSaved: "トークンを保存しました。",
     tTokenRemoved: "トークンを削除しました。",
@@ -143,10 +143,10 @@ const T = {
     tDupUrl: "このURLはすでに登録されています。",
     every: (label: string) => `${label}ごと`,
     // setup: local offline
-    loKicker: "はじめに / このMacで監視",
-    loTitle: "このMacの監視プログラムが起動していません",
+    loKicker: "はじめに / このMacでモニター",
+    loTitle: "このMacのモニタープログラムが起動していません",
     loLead:
-      "「このMac」モードは、あなたのMac上で動く小さなプログラムが監視します。まだ入っていない場合は、次の手順で始めてください（データはこのMacの外に出ません）。",
+      "「このMac」モードは、あなたのMac上で動く小さなプログラムがモニターします。まだ入っていない場合は、次の手順で始めてください（データはこのMacの外に出ません）。",
     loStep1: "下のボタンからアプリ一式（ZIP）をダウンロードします。",
     loStep2a: "ダウンロードした ",
     loStep2b: " をダブルクリックして展開します。",
@@ -158,7 +158,7 @@ const T = {
     loStep4b: "② Appleメニュー →「システム設定」→「プライバシーとセキュリティ」を開く",
     loStep4c: "③ 下の方の「このまま開く（Open Anyway）」を押し、Touch IDまたはパスワードで承認",
     loStep4d: "④ もう一度 start.command をダブルクリック →「開く」",
-    loStep5: "この画面に戻り、下のボタンで再読み込みすると監視リストが表示されます。",
+    loStep5: "この画面に戻り、下のボタンで再読み込みするとモニターリストが表示されます。",
     loStep5note: "macOS標準のPython3で動きます。起動に数十秒かかることがあります。",
     loDownload: "アプリをダウンロード（ZIP）",
     reload: "再読み込み",
@@ -169,10 +169,10 @@ const T = {
     loAltP2a: "その後 ",
     loAltP2b: " をダブルクリックすれば開きます。",
     // setup: cloud token
-    ctKicker: "はじめに / クラウドで監視",
-    ctTitle: "クラウド監視を使うには、最初に1回だけ設定が必要です",
+    ctKicker: "はじめに / クラウドでモニター",
+    ctTitle: "クラウドモニターを使うには、最初に1回だけ設定が必要です",
     ctLead:
-      "「クラウド」モードは、Macを閉じていても監視を続けます。あなたのGitHubアカウントで、専用の合言葉（トークン）を1つ作って貼り付けてください。",
+      "「クラウド」モードは、Macを閉じていてもモニターを続けます。あなたのGitHubアカウントで、専用の合言葉（トークン）を1つ作って貼り付けてください。",
     ctStep1: "下のボタンでGitHubのトークン作成画面を開きます。",
     ctStep1note: "Repository access は pagewatch-data のみ、Permissions は Contents と Actions を「Read and write」に。",
     ctStep2: "作成された文字列（github_pat_…）をコピーします。",
@@ -461,7 +461,7 @@ function IconTrash() {
   );
 }
 
-function StatusBadge({ status, t, onAck }: { status: string; t: Dict; onAck?: () => void }) {
+function StatusBadge({ status, t, onAck, title }: { status: string; t: Dict; onAck?: () => void; title?: string }) {
   const tone = STATUS_TONE[status] || "neutral";
   const label = t.status[status] || t.status.waiting;
   const inner = (
@@ -482,12 +482,12 @@ function StatusBadge({ status, t, onAck }: { status: string; t: Dict; onAck?: ()
   // update as seen (stored per-browser) until the site changes again.
   if (onAck) {
     return (
-      <button type="button" className={`status-badge status-${tone} status-ack`} onClick={onAck} title={t.ackHint}>
+      <button type="button" className={`status-badge status-${tone} status-ack`} onClick={onAck} title={title ?? t.ackHint}>
         {inner}
       </button>
     );
   }
-  return <span className={`status-badge status-${tone}`}>{inner}</span>;
+  return <span className={`status-badge status-${tone}`} title={title}>{inner}</span>;
 }
 
 // Where a site's favicon might live, most specific first. Project pages served
@@ -540,6 +540,7 @@ function SiteIcon({ site }: { site: Site }) {
 const HOUR_MS = 3_600_000;
 const SERIES_COLORS = ["#ff6b3d", "#3868ff", "#51a53e", "#a24bff", "#e0a400", "#d6336c", "#0f9b8e"];
 
+type Ack = { stamp: string; at: string };
 type ChartView = "lanes" | "cumulative" | "hours";
 const CHART_RANGES = [24, 72, 168, 336]; // hours: 24h / 3d / 7d / 14d
 
@@ -558,7 +559,7 @@ type ChartSeries = { id: number; name: string; color: string; points: ChartDatum
 // Change-activity view with switchable shapes (lanes / cumulative / by-hour)
 // and an adjustable time window. "changed" events are the only series we keep.
 // `compact` drops the big header for embedding inside an expanded site row.
-function ActivityChart({ events, t, lang, compact }: { events: EventItem[]; t: Dict; lang: Lang; compact?: boolean }) {
+function ActivityChart({ events, t, lang, compact, markTime, markLabel }: { events: EventItem[]; t: Dict; lang: Lang; compact?: boolean; markTime?: number; markLabel?: string }) {
   const [view, setView] = useState<ChartView>("lanes");
   const [rangeH, setRangeH] = useState(24);
   const now = Date.now();
@@ -594,6 +595,7 @@ function ActivityChart({ events, t, lang, compact }: { events: EventItem[]; t: D
   const rangeLabel = (h: number) =>
     h === 24 ? (lang === "ja" ? "24時間" : "24h") : lang === "ja" ? `${h / 24}日` : `${h / 24}d`;
   const sub = view === "lanes" ? t.subLanes : view === "cumulative" ? t.subCumulative : t.subHours;
+  const markInRange = markTime != null && markTime >= startMs && markTime <= now;
 
   return (
     <section className={`chart-card${compact ? " chart-card-compact" : ""}`} aria-label={t.chartTitle}>
@@ -631,9 +633,12 @@ function ActivityChart({ events, t, lang, compact }: { events: EventItem[]; t: D
         <p className="chart-empty">{t.chartEmpty}</p>
       ) : (
         <>
-          <p className="chart-sub">{sub}</p>
-          {view === "lanes" && <LaneView series={series} startMs={startMs} spanMs={spanMs} clock={clock} />}
-          {view === "cumulative" && <CumulativeView series={series} startMs={startMs} spanMs={spanMs} now={now} clock={clock} />}
+          <p className="chart-sub">
+            {sub}
+            {markInRange && view !== "hours" && <span className="mark-note"> · {markLabel} {clock(markTime!)}</span>}
+          </p>
+          {view === "lanes" && <LaneView series={series} startMs={startMs} spanMs={spanMs} clock={clock} markPct={markInRange ? ((markTime! - startMs) / spanMs) * 100 : null} />}
+          {view === "cumulative" && <CumulativeView series={series} startMs={startMs} spanMs={spanMs} now={now} clock={clock} markTime={markInRange ? markTime! : null} />}
           {view === "hours" && <HoursView series={series} />}
           {view === "hours" ? (
             <div className="chart-axis chart-axis-hours">
@@ -653,7 +658,7 @@ function ActivityChart({ events, t, lang, compact }: { events: EventItem[]; t: D
 }
 
 // A: one lane per site, a dot at each detection time, dot area ∝ magnitude.
-function LaneView({ series, startMs, spanMs, clock }: { series: ChartSeries[]; startMs: number; spanMs: number; clock: (ms: number) => string }) {
+function LaneView({ series, startMs, spanMs, clock, markPct }: { series: ChartSeries[]; startMs: number; spanMs: number; clock: (ms: number) => string; markPct?: number | null }) {
   const maxMag = Math.max(1, ...series.flatMap((s) => s.points.map((p) => p.mag)));
   return (
     <div className="lane-chart">
@@ -661,6 +666,7 @@ function LaneView({ series, startMs, spanMs, clock }: { series: ChartSeries[]; s
         <div className="lane" key={s.id}>
           <span className="lane-name">{s.name}</span>
           <div className="lane-strip">
+            {markPct != null && <span className="lane-mark" style={{ left: `${markPct}%` }} />}
             {s.points.map((p, i) => {
               const d = 7 + 11 * Math.sqrt(p.mag / maxMag);
               return (
@@ -680,7 +686,7 @@ function LaneView({ series, startMs, spanMs, clock }: { series: ChartSeries[]; s
 }
 
 // D: cumulative lines-changed as a per-site step line.
-function CumulativeView({ series, startMs, spanMs, now, clock }: { series: ChartSeries[]; startMs: number; spanMs: number; now: number; clock: (ms: number) => string }) {
+function CumulativeView({ series, startMs, spanMs, now, clock, markTime }: { series: ChartSeries[]; startMs: number; spanMs: number; now: number; clock: (ms: number) => string; markTime?: number | null }) {
   const W = 820, H = 168, padL = 34, padR = 8, padT = 10, padB = 8;
   const totals = series.map((s) => s.points.reduce((a, p) => a + p.mag, 0));
   const yMax = Math.max(1, ...totals);
@@ -688,6 +694,9 @@ function CumulativeView({ series, startMs, spanMs, now, clock }: { series: Chart
   const yS = (v: number) => padT + (1 - v / yMax) * (H - padT - padB);
   return (
     <svg className="line-chart" viewBox={`0 0 ${W} ${H}`} role="img">
+      {markTime != null && (
+        <line className="mark-line" x1={xS(markTime)} y1={padT} x2={xS(markTime)} y2={H - padB} vectorEffect="non-scaling-stroke" />
+      )}
       {[0, 0.5, 1].map((f) => (
         <g key={f}>
           <line className={`grid-line${f ? " grid-top" : ""}`} x1={padL} y1={yS(yMax * f)} x2={W - padR} y2={yS(yMax * f)} vectorEffect="non-scaling-stroke" />
@@ -721,23 +730,24 @@ function CumulativeView({ series, startMs, spanMs, now, clock }: { series: Chart
   );
 }
 
-// Always-on row sparkline: this site's change detections over the last 7 days,
-// dots placed by time and sized by magnitude. A quick "how active lately" cue.
+// Always-on row punchcard: this site's changes over the last 7 days folded onto
+// the 24 hours of the day (cell opacity ∝ magnitude). Shows *when* — the
+// time-of-day a site tends to change — at a glance. Left edge = 0:00.
 function MiniTrend({ events, days = 7 }: { events: EventItem[]; days?: number }) {
-  const now = Date.now();
-  const span = days * 24 * HOUR_MS;
-  const start = now - span;
-  const pts = events
-    .filter((e) => e.kind === "changed")
-    .map((e) => ({ t: Date.parse(e.created_at), mag: eventMagnitude(e.summary) }))
-    .filter((p) => p.t >= start);
-  const maxMag = Math.max(1, ...pts.map((p) => p.mag));
+  const start = Date.now() - days * 24 * HOUR_MS;
+  const byHour = Array<number>(24).fill(0);
+  for (const e of events) {
+    if (e.kind !== "changed") continue;
+    const t = Date.parse(e.created_at);
+    if (t < start) continue;
+    byHour[new Date(t).getHours()] += eventMagnitude(e.summary);
+  }
+  const max = Math.max(1, ...byHour);
   return (
-    <div className="mini-trend" aria-hidden="true">
-      {pts.map((p, i) => {
-        const d = 4 + 5 * Math.sqrt(p.mag / maxMag);
-        return <i key={i} style={{ left: `${((p.t - start) / span) * 100}%`, width: d, height: d }} />;
-      })}
+    <div className="mini-trend" aria-hidden="true" title="0–23時の変化（左=0時）">
+      {byHour.map((v, h) => (
+        <i key={h} style={v > 0 ? { background: "var(--orange)", opacity: 0.25 + 0.75 * (v / max) } : undefined} />
+      ))}
     </div>
   );
 }
@@ -819,28 +829,40 @@ function App() {
   // so the badge quiets down until a *new* change produces a fresh stamp.
   // Separate keys per source: local and cloud use unrelated site ids.
   const ackKey = `pagewatch-ack-${source}`;
-  const [acks, setAcks] = useState<Record<string, string>>({});
+  const [acks, setAcks] = useState<Record<string, Ack>>({});
   useEffect(() => {
     try {
-      setAcks(JSON.parse(localStorage.getItem(ackKey) || "{}"));
+      const raw = JSON.parse(localStorage.getItem(ackKey) || "{}");
+      // Migrate the old shape {id: stamp} to {id: {stamp, at}} so upgrades keep
+      // existing acknowledgements (with an unknown time).
+      const next: Record<string, Ack> = {};
+      for (const [k, v] of Object.entries(raw)) {
+        if (typeof v === "string") next[k] = { stamp: v, at: "" };
+        else if (v && typeof v === "object" && "stamp" in v) next[k] = v as Ack;
+      }
+      setAcks(next);
     } catch {
       setAcks({});
     }
   }, [ackKey]);
 
   const ackStamp = (site: Site) => site.last_changed || site.last_checked || "";
-  const isAcked = (site: Site) => site.status === "changed" && acks[String(site.id)] === ackStamp(site);
+  const isAcked = (site: Site) => site.status === "changed" && acks[String(site.id)]?.stamp === ackStamp(site);
+  // When the site was last marked read — kept even after a newer change flips it
+  // back to "changed", so the chart can show "updates since you last looked".
+  const lastAckAt = (site: Site) => acks[String(site.id)]?.at || "";
   const displayStatus = (site: Site) => (isAcked(site) ? "seen" : site.status);
   const unackedChanged = state.sites.filter((s) => s.status === "changed" && !isAcked(s));
 
-  const saveAcks = (next: Record<string, string>) => {
+  const saveAcks = (next: Record<string, Ack>) => {
     setAcks(next);
     localStorage.setItem(ackKey, JSON.stringify(next));
   };
-  const ackSite = (site: Site) => saveAcks({ ...acks, [String(site.id)]: ackStamp(site) });
+  const ackSite = (site: Site) => saveAcks({ ...acks, [String(site.id)]: { stamp: ackStamp(site), at: new Date().toISOString() } });
   const ackAll = () => {
+    const at = new Date().toISOString();
     const next = { ...acks };
-    for (const site of unackedChanged) next[String(site.id)] = ackStamp(site);
+    for (const site of unackedChanged) next[String(site.id)] = { stamp: ackStamp(site), at };
     saveAcks(next);
   };
 
@@ -1163,13 +1185,6 @@ function App() {
             </button>
           </form>
         </section>
-
-        <div className="stats-grid">
-          <article><span>{t.statTotal}</span><strong>{state.summary.total}</strong></article>
-          <article><span>{t.statActive}</span><strong>{state.summary.active}</strong></article>
-          <article className={unackedChanged.length ? "accent-stat" : ""}><span>{t.statChanged}</span><strong>{unackedChanged.length}</strong></article>
-          <article className={state.summary.errors ? "error-stat" : ""}><span>{t.statErrors}</span><strong>{state.summary.errors}</strong></article>
-        </div>
         </aside>
 
         <div className="content">
@@ -1259,6 +1274,7 @@ function App() {
                       status={displayStatus(site)}
                       t={t}
                       onAck={site.status === "changed" && !isAcked(site) ? () => ackSite(site) : undefined}
+                      title={isAcked(site) && lastAckAt(site) ? `${t.status.seen}: ${formatDate(lastAckAt(site), lang, t)}` : undefined}
                     />
                   </div>
                   <a href={site.url} target="_blank" rel="noreferrer">{hostname(site.url)} <span>↗</span></a>
@@ -1310,7 +1326,14 @@ function App() {
               </article>
               {open && (
                 <div className="site-detail">
-                  <ActivityChart events={siteEvents} t={t} lang={lang} compact />
+                  <ActivityChart
+                    events={siteEvents}
+                    t={t}
+                    lang={lang}
+                    compact
+                    markTime={lastAckAt(site) ? Date.parse(lastAckAt(site)) : undefined}
+                    markLabel={t.status.seen}
+                  />
                   <div className="detail-history">
                     <p className="eyebrow">{t.detailHistory}</p>
                     <div className="timeline">
