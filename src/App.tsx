@@ -89,10 +89,18 @@ const T = {
     tRenamed: "表示名を変更しました。",
     chartKicker: "変化の記録",
     chartTitle: "変化の推移",
-    chartUnit: "件 / 24時間",
-    chartEmpty: "この24時間に変化は検知されていません。",
-    chartSub: "サイト別・変化を検知した時刻",
+    chartUnit: "件",
+    chartEmpty: "この期間に変化は検知されていません。",
     nowLabel: "現在",
+    viewLanes: "レーン",
+    viewCumulative: "累積",
+    viewHours: "時間帯",
+    viewAria: "グラフの種類",
+    rangeAria: "表示期間",
+    subLanes: "サイト別・変化を検知した時刻（●の大きさ＝変化量）",
+    subCumulative: "累積の変化量（行数）",
+    subHours: "時間帯ごとの変化量（濃さ＝行数）",
+    hoursAxis: ["0時", "6時", "12時", "18時", "23時"],
     histKicker: "最近の動き",
     histTitle: "更新履歴",
     histEmpty: "確認結果がここに記録されます。",
@@ -233,10 +241,18 @@ const T = {
     tRenamed: "Display name updated.",
     chartKicker: "Change activity",
     chartTitle: "Changes over time",
-    chartUnit: "in 24h",
-    chartEmpty: "No changes detected in the last 24 hours.",
-    chartSub: "Detection times by site",
+    chartUnit: "changes",
+    chartEmpty: "No changes detected in this range.",
     nowLabel: "now",
+    viewLanes: "Lanes",
+    viewCumulative: "Cumulative",
+    viewHours: "By hour",
+    viewAria: "Chart type",
+    rangeAria: "Time range",
+    subLanes: "Detection times by site (dot size = magnitude)",
+    subCumulative: "Cumulative lines changed",
+    subHours: "Change volume by hour (darker = more lines)",
+    hoursAxis: ["0h", "6h", "12h", "18h", "23h"],
     histKicker: "Recent activity",
     histTitle: "Recent updates",
     histEmpty: "Check results will appear here.",
@@ -520,35 +536,59 @@ function SiteIcon({ site }: { site: Site }) {
 const HOUR_MS = 3_600_000;
 const SERIES_COLORS = ["#ff6b3d", "#3868ff", "#51a53e", "#a24bff", "#e0a400", "#d6336c", "#0f9b8e"];
 
-// Minute-precision timeline of the last 24 hours: one horizontal lane per site,
-// a dot at the exact time each change was detected. With checks every 30-60
-// minutes this reads better (and much shorter) than day-bucketed lines.
-function ActivityChart({ events, t }: { events: EventItem[]; t: Dict }) {
-  const now = Date.now();
-  const startMs = now - 24 * HOUR_MS;
+type ChartView = "lanes" | "cumulative" | "hours";
+const CHART_RANGES = [24, 72, 168, 336]; // hours: 24h / 3d / 7d / 14d
 
-  const bySite = new Map<number, { name: string; times: number[] }>();
+// How many visible lines a "changed" event touched, parsed from the backend's
+// summary ("追加された内容（N件）" / "なくなった内容（N件）"). Reorder-only
+// changes carry no counts, so they weigh 0.
+function eventMagnitude(summary: string): number {
+  const added = summary.match(/追加された内容（(\d+)件）/);
+  const removed = summary.match(/なくなった内容（(\d+)件）/);
+  return (added ? +added[1] : 0) + (removed ? +removed[1] : 0);
+}
+
+type ChartDatum = { t: number; mag: number };
+type ChartSeries = { id: number; name: string; color: string; points: ChartDatum[] };
+
+// Change-activity view with switchable shapes (lanes / cumulative / by-hour)
+// and an adjustable time window. "changed" events are the only series we keep.
+function ActivityChart({ events, t, lang }: { events: EventItem[]; t: Dict; lang: Lang }) {
+  const [view, setView] = useState<ChartView>("lanes");
+  const [rangeH, setRangeH] = useState(24);
+  const now = Date.now();
+  const spanMs = rangeH * HOUR_MS;
+  const startMs = now - spanMs;
+
+  const bySite = new Map<number, ChartSeries>();
   for (const event of events) {
     if (event.kind !== "changed") continue;
     const time = Date.parse(event.created_at);
     if (!(time >= startMs && time <= now)) continue;
     let entry = bySite.get(event.site_id);
     if (!entry) {
-      entry = { name: event.site_name, times: [] };
+      entry = { id: event.site_id, name: event.site_name, color: "", points: [] };
       bySite.set(event.site_id, entry);
     }
-    entry.times.push(time);
+    entry.points.push({ t: time, mag: eventMagnitude(event.summary) });
   }
+  const series = [...bySite.values()]
+    .sort((a, b) => a.id - b.id)
+    .map((s, i) => ({ ...s, color: SERIES_COLORS[i % SERIES_COLORS.length] }));
+  const total = series.reduce((sum, s) => sum + s.points.length, 0);
 
-  const series = [...bySite.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([id, entry], i) => ({ id, ...entry, color: SERIES_COLORS[i % SERIES_COLORS.length] }));
-  const total = series.reduce((sum, s) => sum + s.times.length, 0);
-
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const timeAxis = (ms: number) => {
+    const d = new Date(ms);
+    return rangeH <= 24 ? `${d.getHours()}:${pad(d.getMinutes())}` : `${d.getMonth() + 1}/${d.getDate()}`;
+  };
   const clock = (ms: number) => {
     const d = new Date(ms);
-    return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+    return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${pad(d.getMinutes())}`;
   };
+  const rangeLabel = (h: number) =>
+    h === 24 ? (lang === "ja" ? "24時間" : "24h") : lang === "ja" ? `${h / 24}日` : `${h / 24}d`;
+  const sub = view === "lanes" ? t.subLanes : view === "cumulative" ? t.subCumulative : t.subHours;
 
   return (
     <section className="chart-card" aria-labelledby="chart-title">
@@ -557,36 +597,155 @@ function ActivityChart({ events, t }: { events: EventItem[]; t: Dict }) {
         <span className="chart-total">{total}<small>{t.chartUnit}</small></span>
       </div>
 
+      <div className="chart-controls">
+        <div className="seg" role="tablist" aria-label={t.viewAria}>
+          {(["lanes", "cumulative", "hours"] as ChartView[]).map((v) => (
+            <button
+              key={v}
+              role="tab"
+              aria-selected={view === v}
+              className={view === v ? "seg-on" : ""}
+              onClick={() => setView(v)}
+            >
+              {v === "lanes" ? t.viewLanes : v === "cumulative" ? t.viewCumulative : t.viewHours}
+            </button>
+          ))}
+        </div>
+        <div className="seg" role="group" aria-label={t.rangeAria}>
+          {CHART_RANGES.map((h) => (
+            <button key={h} aria-pressed={rangeH === h} className={rangeH === h ? "seg-on" : ""} onClick={() => setRangeH(h)}>
+              {rangeLabel(h)}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {total === 0 ? (
         <p className="chart-empty">{t.chartEmpty}</p>
       ) : (
         <>
-          <p className="chart-sub">{t.chartSub}</p>
-          <div className="lane-chart" role="img" aria-label={t.chartSub}>
-            {series.map((s) => (
-              <div className="lane" key={s.id}>
-                <span className="lane-name">{s.name}</span>
-                <div className="lane-strip">
-                  {s.times.map((time, i) => (
-                    <i
-                      key={i}
-                      style={{ left: `${((time - startMs) / (24 * HOUR_MS)) * 100}%`, background: s.color }}
-                      title={clock(time)}
-                    />
-                  ))}
-                </div>
-                <b className="lane-count">{s.times.length}</b>
-              </div>
-            ))}
-          </div>
-          <div className="chart-axis">
-            <span>{clock(startMs)}</span>
-            <span>{clock(startMs + 12 * HOUR_MS)}</span>
-            <span>{t.nowLabel}</span>
-          </div>
+          <p className="chart-sub">{sub}</p>
+          {view === "lanes" && <LaneView series={series} startMs={startMs} spanMs={spanMs} clock={clock} />}
+          {view === "cumulative" && <CumulativeView series={series} startMs={startMs} spanMs={spanMs} now={now} clock={clock} />}
+          {view === "hours" && <HoursView series={series} />}
+          {view === "hours" ? (
+            <div className="chart-axis chart-axis-hours">
+              {t.hoursAxis.map((h, i) => <span key={i}>{h}</span>)}
+            </div>
+          ) : (
+            <div className={view === "cumulative" ? "chart-axis chart-axis-cum" : "chart-axis"}>
+              <span>{timeAxis(startMs)}</span>
+              <span>{timeAxis(startMs + spanMs / 2)}</span>
+              <span>{t.nowLabel}</span>
+            </div>
+          )}
         </>
       )}
     </section>
+  );
+}
+
+// A: one lane per site, a dot at each detection time, dot area ∝ magnitude.
+function LaneView({ series, startMs, spanMs, clock }: { series: ChartSeries[]; startMs: number; spanMs: number; clock: (ms: number) => string }) {
+  const maxMag = Math.max(1, ...series.flatMap((s) => s.points.map((p) => p.mag)));
+  return (
+    <div className="lane-chart">
+      {series.map((s) => (
+        <div className="lane" key={s.id}>
+          <span className="lane-name">{s.name}</span>
+          <div className="lane-strip">
+            {s.points.map((p, i) => {
+              const d = 7 + 11 * Math.sqrt(p.mag / maxMag);
+              return (
+                <i
+                  key={i}
+                  style={{ left: `${((p.t - startMs) / spanMs) * 100}%`, width: d, height: d, background: s.color }}
+                  title={`${clock(p.t)} · ${p.mag}`}
+                />
+              );
+            })}
+          </div>
+          <b className="lane-count">{s.points.reduce((a, p) => a + p.mag, 0)}</b>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// D: cumulative lines-changed as a per-site step line.
+function CumulativeView({ series, startMs, spanMs, now, clock }: { series: ChartSeries[]; startMs: number; spanMs: number; now: number; clock: (ms: number) => string }) {
+  const W = 820, H = 168, padL = 34, padR = 8, padT = 10, padB = 8;
+  const totals = series.map((s) => s.points.reduce((a, p) => a + p.mag, 0));
+  const yMax = Math.max(1, ...totals);
+  const xS = (ms: number) => padL + ((ms - startMs) / spanMs) * (W - padL - padR);
+  const yS = (v: number) => padT + (1 - v / yMax) * (H - padT - padB);
+  return (
+    <svg className="line-chart" viewBox={`0 0 ${W} ${H}`} role="img">
+      {[0, 0.5, 1].map((f) => (
+        <g key={f}>
+          <line className={`grid-line${f ? " grid-top" : ""}`} x1={padL} y1={yS(yMax * f)} x2={W - padR} y2={yS(yMax * f)} vectorEffect="non-scaling-stroke" />
+          <text className="y-label" x={padL - 5} y={yS(yMax * f) + 3} textAnchor="end">{Math.round(yMax * f)}</text>
+        </g>
+      ))}
+      {series.map((s) => {
+        const pts = [...s.points].sort((a, b) => a.t - b.t);
+        let cum = 0;
+        let d = `M ${xS(startMs)} ${yS(0)}`;
+        const dots: { x: number; y: number; p: ChartDatum; cum: number }[] = [];
+        for (const p of pts) {
+          d += ` L ${xS(p.t)} ${yS(cum)}`;
+          cum += p.mag;
+          d += ` L ${xS(p.t)} ${yS(cum)}`;
+          dots.push({ x: xS(p.t), y: yS(cum), p, cum });
+        }
+        d += ` L ${xS(now)} ${yS(cum)}`;
+        return (
+          <g key={s.id}>
+            <path className="series-line" d={d} style={{ stroke: s.color }} vectorEffect="non-scaling-stroke" />
+            {dots.map((dt, i) => (
+              <circle key={i} cx={dt.x} cy={dt.y} r={3} style={{ fill: s.color }}>
+                <title>{`${s.name} · ${clock(dt.p.t)} · +${dt.p.mag} (累計 ${dt.cum})`}</title>
+              </circle>
+            ))}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// C: punchcard — site × hour-of-day, cell opacity ∝ magnitude in that hour.
+function HoursView({ series }: { series: ChartSeries[] }) {
+  const maxCell = Math.max(
+    1,
+    ...series.map((s) => {
+      const row = Array<number>(24).fill(0);
+      for (const p of s.points) row[new Date(p.t).getHours()] += p.mag;
+      return Math.max(...row);
+    }),
+  );
+  return (
+    <div className="heat-chart">
+      {series.map((s) => {
+        const row = Array<number>(24).fill(0);
+        for (const p of s.points) row[new Date(p.t).getHours()] += p.mag;
+        return (
+          <div className="heat-row" key={s.id}>
+            <span className="heat-name">{s.name}</span>
+            <div className="heat-cells">
+              {row.map((v, h) => (
+                <i
+                  key={h}
+                  className="heat-cell"
+                  style={v > 0 ? { background: s.color, opacity: 0.25 + 0.75 * (v / maxCell) } : undefined}
+                  title={v > 0 ? `${s.name} · ${h}:00 · ${v}` : undefined}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -971,11 +1130,10 @@ function App() {
           <article className={unackedChanged.length ? "accent-stat" : ""}><span>{t.statChanged}</span><strong>{unackedChanged.length}</strong></article>
           <article className={state.summary.errors ? "error-stat" : ""}><span>{t.statErrors}</span><strong>{state.summary.errors}</strong></article>
         </div>
-
-        <ActivityChart events={state.events} t={t} />
         </aside>
 
         <div className="content">
+        <ActivityChart events={state.events} t={t} lang={lang} />
         <section className="dashboard-section" aria-labelledby="watch-title">
           <div className="section-title-row">
             <div className="title-with-index">

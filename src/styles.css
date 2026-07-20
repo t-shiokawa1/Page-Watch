@@ -183,14 +183,38 @@ main { max-width: 1500px; margin: 0 auto; padding: 0 clamp(18px, 4vw, 60px) 16px
 .chart-total { font-size: 20px; font-weight: 500; letter-spacing: -.05em; line-height: 1; }
 .chart-total small { font-size: 10px; color: var(--muted); margin-left: 3px; font-weight: 400; letter-spacing: 0; }
 .chart-sub { margin: -4px 0 0; font-size: 10px; color: var(--muted); }
-/* 24h detection-time lanes: [site name][dot strip][count] per site. */
+/* View + range switchers. */
+.chart-controls { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; padding: 2px; gap: 2px; background: var(--white); }
+.seg button { border: 0; background: transparent; border-radius: 5px; padding: 4px 10px; font-size: 11px; font-weight: 600; color: var(--muted); transition: .15s; }
+.seg button:hover:not(.seg-on) { color: var(--ink); }
+.seg .seg-on { background: var(--ink); color: var(--white); }
+
+/* A: detection-time lanes — [site name][dot strip][total]. Dots sized by JS. */
 .lane-chart { display: grid; gap: 5px; }
-.lane { display: grid; grid-template-columns: 76px 1fr 20px; align-items: center; gap: 8px; }
+.lane { display: grid; grid-template-columns: 92px 1fr 34px; align-items: center; gap: 10px; }
 .lane-name { font-size: 11px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lane-strip { position: relative; height: 14px; background: var(--cream); border-radius: 2px; }
-.lane-strip i { position: absolute; top: 3px; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; }
+.lane-strip { position: relative; height: 20px; background: var(--cream); border-radius: 3px; }
+.lane-strip i { position: absolute; top: 50%; transform: translate(-50%, -50%); border-radius: 50%; opacity: .9; }
 .lane-count { font: 500 11px ui-monospace, "SFMono-Regular", monospace; color: var(--muted); text-align: right; }
-.chart-axis { display: flex; justify-content: space-between; padding-left: 84px; font: 400 10px ui-monospace, "SFMono-Regular", monospace; color: var(--muted); letter-spacing: .05em; }
+
+/* D: cumulative step line. */
+.line-chart { width: 100%; height: auto; display: block; overflow: visible; }
+.grid-line { stroke: var(--line); }
+.grid-top { stroke-dasharray: 2 4; }
+.series-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.y-label { font: 400 9px ui-monospace, "SFMono-Regular", monospace; fill: var(--muted); }
+
+/* C: punchcard heatmap — site × hour-of-day. */
+.heat-chart { display: grid; gap: 3px; }
+.heat-row { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 10px; }
+.heat-name { font-size: 11px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.heat-cells { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; }
+.heat-cell { height: 13px; border-radius: 1px; background: var(--cream); }
+
+.chart-axis { display: flex; justify-content: space-between; padding-left: 102px; font: 400 10px ui-monospace, "SFMono-Regular", monospace; color: var(--muted); letter-spacing: .05em; }
+/* Cumulative is an SVG whose plot starts at padL=34 of an 820-wide viewBox. */
+.chart-axis-cum { padding-left: 4.1%; padding-right: 1%; }
 .chart-empty { margin: 0; font-size: 11px; color: var(--muted); text-align: center; padding: 10px 0; }
 
 .site-list { border: 1px solid var(--line); background: var(--white); }
