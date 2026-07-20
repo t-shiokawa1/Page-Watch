@@ -38,6 +38,7 @@ const STATUS_TONE: Record<string, string> = {
   baseline: "good",
   unchanged: "good",
   changed: "changed",
+  seen: "good",
   error: "error",
   paused: "neutral",
 };
@@ -111,9 +112,12 @@ const T = {
       baseline: "監視中",
       unchanged: "変化なし",
       changed: "更新あり",
+      seen: "既読",
       error: "要確認",
       paused: "一時停止",
     } as Record<string, string>,
+    ackHint: "クリックで既読にする",
+    ackAll: "すべて既読に",
     tAddCloud: "クラウドの監視リストに追加しました。初回チェックを開始します。",
     tAddLocal: "監視サイトを追加しました。最初の比較基準を作成します。",
     confirmDelete: (name: string) => `「${name}」と更新履歴を削除しますか？`,
@@ -252,9 +256,12 @@ const T = {
       baseline: "Watching",
       unchanged: "No change",
       changed: "Changed",
+      seen: "Seen",
       error: "Check needed",
       paused: "Paused",
     } as Record<string, string>,
+    ackHint: "Click to mark as seen",
+    ackAll: "Mark all seen",
     tAddCloud: "Added to the cloud watch list. Running the first check now.",
     tAddLocal: "Site added. Creating the first baseline for comparison.",
     confirmDelete: (name: string) => `Delete “${name}” and its update history?`,
@@ -432,11 +439,11 @@ function IconTrash() {
   );
 }
 
-function StatusBadge({ status, t }: { status: string; t: Dict }) {
+function StatusBadge({ status, t, onAck }: { status: string; t: Dict; onAck?: () => void }) {
   const tone = STATUS_TONE[status] || "neutral";
   const label = t.status[status] || t.status.waiting;
-  return (
-    <span className={`status-badge status-${tone}`}>
+  const inner = (
+    <>
       {/* The "changed" state keeps its acid-green fill, but a sparkle (not just a
           calm dot) marks it as "something new" so the green doesn't read as "OK". */}
       {tone === "changed" ? (
@@ -447,8 +454,18 @@ function StatusBadge({ status, t }: { status: string; t: Dict }) {
         <span className="status-dot" />
       )}
       {label}
-    </span>
+    </>
   );
+  // A "changed" badge doubles as the acknowledge button: one click marks the
+  // update as seen (stored per-browser) until the site changes again.
+  if (onAck) {
+    return (
+      <button type="button" className={`status-badge status-${tone} status-ack`} onClick={onAck} title={t.ackHint}>
+        {inner}
+      </button>
+    );
+  }
+  return <span className={`status-badge status-${tone}`}>{inner}</span>;
 }
 
 // Where a site's favicon might live, most specific first. Project pages served
@@ -615,6 +632,36 @@ function App() {
   const [connError, setConnError] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
+
+  // "Seen" markers for changed sites, kept per-browser (like the cloud token).
+  // We remember which change was acknowledged — the site's last_changed stamp —
+  // so the badge quiets down until a *new* change produces a fresh stamp.
+  // Separate keys per source: local and cloud use unrelated site ids.
+  const ackKey = `pagewatch-ack-${source}`;
+  const [acks, setAcks] = useState<Record<string, string>>({});
+  useEffect(() => {
+    try {
+      setAcks(JSON.parse(localStorage.getItem(ackKey) || "{}"));
+    } catch {
+      setAcks({});
+    }
+  }, [ackKey]);
+
+  const ackStamp = (site: Site) => site.last_changed || site.last_checked || "";
+  const isAcked = (site: Site) => site.status === "changed" && acks[String(site.id)] === ackStamp(site);
+  const displayStatus = (site: Site) => (isAcked(site) ? "seen" : site.status);
+  const unackedChanged = state.sites.filter((s) => s.status === "changed" && !isAcked(s));
+
+  const saveAcks = (next: Record<string, string>) => {
+    setAcks(next);
+    localStorage.setItem(ackKey, JSON.stringify(next));
+  };
+  const ackSite = (site: Site) => saveAcks({ ...acks, [String(site.id)]: ackStamp(site) });
+  const ackAll = () => {
+    const next = { ...acks };
+    for (const site of unackedChanged) next[String(site.id)] = ackStamp(site);
+    saveAcks(next);
+  };
 
   const toggleLang = () => {
     const next: Lang = lang === "ja" ? "en" : "ja";
@@ -939,7 +986,7 @@ function App() {
         <div className="stats-grid">
           <article><span>{t.statTotal}</span><strong>{state.summary.total}</strong></article>
           <article><span>{t.statActive}</span><strong>{state.summary.active}</strong></article>
-          <article className={state.summary.changed ? "accent-stat" : ""}><span>{t.statChanged}</span><strong>{state.summary.changed}</strong></article>
+          <article className={unackedChanged.length ? "accent-stat" : ""}><span>{t.statChanged}</span><strong>{unackedChanged.length}</strong></article>
           <article className={state.summary.errors ? "error-stat" : ""}><span>{t.statErrors}</span><strong>{state.summary.errors}</strong></article>
         </div>
 
@@ -952,13 +999,20 @@ function App() {
             <div className="title-with-index">
               <div><p className="eyebrow">{t.watchKicker}</p><h2 id="watch-title">{t.watchTitle}</h2></div>
             </div>
-            <button
-              className="secondary-button"
-              onClick={() => run("all", () => backend.checkAll(), false)}
-              disabled={busy === "all"}
-            >
-              <span className={busy === "all" ? "spin" : ""}>↻</span> {t.checkAll}
-            </button>
+            <div className="section-title-actions">
+              {unackedChanged.length > 0 && (
+                <button className="secondary-button" onClick={ackAll}>
+                  {t.ackAll}
+                </button>
+              )}
+              <button
+                className="secondary-button"
+                onClick={() => run("all", () => backend.checkAll(), false)}
+                disabled={busy === "all"}
+              >
+                <span className={busy === "all" ? "spin" : ""}>↻</span> {t.checkAll}
+              </button>
+            </div>
           </div>
 
           <div className="site-list" aria-live="polite">
@@ -1002,7 +1056,11 @@ function App() {
                         {site.name}
                       </h3>
                     )}
-                    <StatusBadge status={site.status} t={t} />
+                    <StatusBadge
+                      status={displayStatus(site)}
+                      t={t}
+                      onAck={site.status === "changed" && !isAcked(site) ? () => ackSite(site) : undefined}
+                    />
                   </div>
                   <a href={site.url} target="_blank" rel="noreferrer">{hostname(site.url)} <span>↗</span></a>
                   {site.last_error && <p className="site-error">{site.last_error}</p>}
