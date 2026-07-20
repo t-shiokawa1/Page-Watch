@@ -216,6 +216,7 @@ main { max-width: 1500px; margin: 0 auto; padding: 0 clamp(22px, 5vw, 78px) 24px
 .site-error { margin: 4px 0 0; color: var(--error-fg); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 640px; }
 .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 99px; font-size: 11px; white-space: nowrap; }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #999; }
+.status-icon { flex-shrink: 0; display: block; margin: -1px 0; }
 .status-good .status-dot { background: #51a53e; }
 .status-working .status-dot { background: var(--blue); animation: pulse 1s infinite; }
 .status-changed { border-color: #b3d82d; background: var(--acid); color: var(--on-acid); }

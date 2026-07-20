@@ -403,7 +403,15 @@ function StatusBadge({ status, t }: { status: string; t: Dict }) {
   const label = t.status[status] || t.status.waiting;
   return (
     <span className={`status-badge status-${tone}`}>
-      <span className="status-dot" />
+      {/* The "changed" state keeps its acid-green fill, but a sparkle (not just a
+          calm dot) marks it as "something new" so the green doesn't read as "OK". */}
+      {tone === "changed" ? (
+        <svg className="status-icon" viewBox="0 0 24 24" width="11" height="11" aria-hidden="true">
+          <path fill="currentColor" d="M12 1.7l2.4 6.9 6.9 2.4-6.9 2.4L12 20.3l-2.4-6.9L2.7 11l6.9-2.4z" />
+        </svg>
+      ) : (
+        <span className="status-dot" />
+      )}
       {label}
     </span>
   );
