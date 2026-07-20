@@ -76,7 +76,10 @@ summary:focus-visible,
   outline-offset: 2px;
 }
 
-.app-shell { min-height: 100vh; overflow: hidden; }
+/* overflow-x: clip (not hidden) keeps stray horizontal overflow contained
+   without turning this into a scroll container — which would break the sticky
+   sidebar and topbar inside it. */
+.app-shell { min-height: 100vh; overflow-x: clip; }
 .topbar {
   height: 76px;
   padding: 0 clamp(22px, 5vw, 78px);
@@ -115,7 +118,9 @@ main { max-width: 1500px; margin: 0 auto; padding: 0 clamp(22px, 5vw, 78px) 24px
 /* Desktop: fixed-width sidebar (add form + stats + chart) beside the list.
    The sidebar sticks so the tall list scrolls next to it, not under it. */
 .layout { display: grid; grid-template-columns: minmax(320px, 380px) 1fr; gap: clamp(22px, 3vw, 48px); align-items: start; padding-top: 20px; }
-.side { display: grid; gap: 16px; align-content: start; }
+/* Pin the sidebar (add form + stats + chart) below the sticky topbar so the
+   tall watch list scrolls beside it instead of dragging it off-screen. */
+.side { display: grid; gap: 16px; align-content: start; position: sticky; top: 88px; align-self: start; }
 .content { display: grid; gap: 16px; min-width: 0; }
 
 .add-panel { margin: 0; padding: 16px 18px; border: 1px solid var(--line); background: var(--white); }
@@ -234,7 +239,11 @@ main { max-width: 1500px; margin: 0 auto; padding: 0 clamp(22px, 5vw, 78px) 24px
 .site-actions { display: flex; gap: 6px; }
 .site-actions button { width: 34px; height: 34px; border: 1px solid var(--line); background: transparent; display: grid; place-items: center; font-size: 14px; transition: .18s; }
 .site-actions button:hover:not(:disabled) { background: var(--ink); color: var(--white); border-color: var(--ink); }
-.site-actions .danger-action:hover:not(:disabled) { background: var(--orange); border-color: var(--orange); }
+.site-actions .icn { display: block; }
+/* Delete reads as destructive at rest (muted red + a gap from the safe
+   controls), not only on hover. */
+.site-actions .danger-action { margin-left: 5px; color: var(--error-fg); border-color: color-mix(in srgb, var(--error-fg) 45%, var(--line)); }
+.site-actions .danger-action:hover:not(:disabled) { background: var(--orange); border-color: var(--orange); color: var(--white); }
 .empty-state { min-height: 150px; display: flex; align-items: center; justify-content: center; gap: 12px; color: var(--muted); font-size: 13px; }
 .loader { width: 15px; height: 15px; border: 2px solid var(--line); border-top-color: var(--orange); border-radius: 50%; animation: spin 1s linear infinite; }
 

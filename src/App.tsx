@@ -398,6 +398,40 @@ function fmtInterval(minutes: number, lang: Lang): string {
   return lang === "ja" ? `${minutes}分` : `${minutes} min`;
 }
 
+// Small line icons for the per-row controls. Clearer than the old glyph hacks
+// ("Ⅱ" roman numeral for pause, "×" for delete) and they inherit currentColor.
+function IconRefresh({ spin }: { spin?: boolean }) {
+  return (
+    <svg className={`icn${spin ? " spin" : ""}`} viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 11a8 8 0 1 0-.9 4.5" />
+      <path d="M20 4v6h-6" />
+    </svg>
+  );
+}
+function IconPause() {
+  return (
+    <svg className="icn" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+      <rect x="6" y="5" width="4" height="14" rx="1" />
+      <rect x="14" y="5" width="4" height="14" rx="1" />
+    </svg>
+  );
+}
+function IconPlay() {
+  return (
+    <svg className="icn" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+      <path d="M7 4.5l13 7.5-13 7.5z" />
+    </svg>
+  );
+}
+function IconTrash() {
+  return (
+    <svg className="icn" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 7h16" />
+      <path d="M10 4h4M9 7l.7 12.5a1 1 0 0 0 1 1h2.6a1 1 0 0 0 1-1L15 7" />
+    </svg>
+  );
+}
+
 function StatusBadge({ status, t }: { status: string; t: Dict }) {
   const tone = STATUS_TONE[status] || "neutral";
   const label = t.status[status] || t.status.waiting;
@@ -452,6 +486,13 @@ function SiteIcon({ site }: { site: Site }) {
         loading="lazy"
         referrerPolicy="no-referrer"
         onError={() => setIdx((i) => i + 1)}
+        onLoad={(e) => {
+          // Some sites answer /favicon.ico with a 1x1 placeholder (or a blank
+          // tracking pixel) that "loads" fine but shows as an empty circle.
+          // Treat anything tinier than a real icon as a miss and move on.
+          const img = e.currentTarget;
+          if (img.naturalWidth > 0 && img.naturalWidth < 8) setIdx((i) => i + 1);
+        }}
       />
     </div>
   );
@@ -996,7 +1037,7 @@ function App() {
                     title={t.checkNow}
                     aria-label={t.checkNow}
                   >
-                    <span className={busy === `check-${site.id}` ? "spin" : ""} aria-hidden="true">↻</span>
+                    <IconRefresh spin={busy === `check-${site.id}`} />
                   </button>
                   <button
                     onClick={() => run(`toggle-${site.id}`, () => backend.toggleSite(site))}
@@ -1004,9 +1045,9 @@ function App() {
                     title={site.enabled ? t.pause : t.resume}
                     aria-label={site.enabled ? t.pause : t.resume}
                   >
-                    <span aria-hidden="true">{site.enabled ? "Ⅱ" : "▶"}</span>
+                    {site.enabled ? <IconPause /> : <IconPlay />}
                   </button>
-                  <button className="danger-action" onClick={() => deleteSite(site)} disabled={busy === `delete-${site.id}`} title={t.del} aria-label={t.del}><span aria-hidden="true">×</span></button>
+                  <button className="danger-action" onClick={() => deleteSite(site)} disabled={busy === `delete-${site.id}`} title={t.del} aria-label={t.del}><IconTrash /></button>
                 </div>
               </article>
             ))}
