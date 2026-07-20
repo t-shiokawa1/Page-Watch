@@ -89,10 +89,10 @@ const T = {
     tRenamed: "表示名を変更しました。",
     chartKicker: "変化の記録",
     chartTitle: "変化の推移",
-    chartUnit: "件 / 14日",
-    chartEmpty: "まだ変化は検知されていません。",
-    chartSub: (n: number) => `サイト別・1日あたりの検知回数（最大 ${n} 件/日）`,
-    today: "今日",
+    chartUnit: "件 / 24時間",
+    chartEmpty: "この24時間に変化は検知されていません。",
+    chartSub: "サイト別・変化を検知した時刻",
+    nowLabel: "現在",
     histKicker: "最近の動き",
     histTitle: "更新履歴",
     histEmpty: "確認結果がここに記録されます。",
@@ -233,10 +233,10 @@ const T = {
     tRenamed: "Display name updated.",
     chartKicker: "Change activity",
     chartTitle: "Changes over time",
-    chartUnit: "in 14 days",
-    chartEmpty: "No changes detected yet.",
-    chartSub: (n: number) => `Detections per day by site (max ${n}/day)`,
-    today: "Today",
+    chartUnit: "in 24h",
+    chartEmpty: "No changes detected in the last 24 hours.",
+    chartSub: "Detection times by site",
+    nowLabel: "now",
     histKicker: "Recent activity",
     histTitle: "Recent updates",
     histEmpty: "Check results will appear here.",
@@ -432,9 +432,11 @@ function IconPlay() {
 }
 function IconTrash() {
   return (
-    <svg className="icn" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg className="icn" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M4 7h16" />
-      <path d="M10 4h4M9 7l.7 12.5a1 1 0 0 0 1 1h2.6a1 1 0 0 0 1-1L15 7" />
+      <path d="M9.5 7V5.4A1.4 1.4 0 0 1 10.9 4h2.2a1.4 1.4 0 0 1 1.4 1.4V7" />
+      <path d="M6.3 7l.9 12a1.6 1.6 0 0 0 1.6 1.5h6.4a1.6 1.6 0 0 0 1.6-1.5l.9-12" />
+      <path d="M10 11v6M14 11v6" />
     </svg>
   );
 }
@@ -515,50 +517,37 @@ function SiteIcon({ site }: { site: Site }) {
   );
 }
 
-const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
 const SERIES_COLORS = ["#ff6b3d", "#3868ff", "#51a53e", "#a24bff", "#e0a400", "#d6336c", "#0f9b8e"];
 
-// Per-site line chart of how many changes were detected each day over the last
-// two weeks. Events are the only time series we keep, so we bucket "changed"
-// events by site and day; each monitored site that changed gets its own line.
+// Minute-precision timeline of the last 24 hours: one horizontal lane per site,
+// a dot at the exact time each change was detected. With checks every 30-60
+// minutes this reads better (and much shorter) than day-bucketed lines.
 function ActivityChart({ events, t }: { events: EventItem[]; t: Dict }) {
-  const days = 14;
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  const startMs = start.getTime() - (days - 1) * DAY_MS;
+  const now = Date.now();
+  const startMs = now - 24 * HOUR_MS;
 
-  const bySite = new Map<number, { name: string; counts: number[]; total: number }>();
+  const bySite = new Map<number, { name: string; times: number[] }>();
   for (const event of events) {
     if (event.kind !== "changed") continue;
-    const time = new Date(event.created_at);
-    time.setHours(0, 0, 0, 0);
-    const idx = Math.round((time.getTime() - startMs) / DAY_MS);
-    if (idx < 0 || idx >= days) continue;
+    const time = Date.parse(event.created_at);
+    if (!(time >= startMs && time <= now)) continue;
     let entry = bySite.get(event.site_id);
     if (!entry) {
-      entry = { name: event.site_name, counts: Array<number>(days).fill(0), total: 0 };
+      entry = { name: event.site_name, times: [] };
       bySite.set(event.site_id, entry);
     }
-    entry.counts[idx] += 1;
-    entry.total += 1;
+    entry.times.push(time);
   }
 
   const series = [...bySite.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([id, entry], i) => ({ id, ...entry, color: SERIES_COLORS[i % SERIES_COLORS.length] }));
+  const total = series.reduce((sum, s) => sum + s.times.length, 0);
 
-  const total = series.reduce((sum, s) => sum + s.total, 0);
-  const maxY = Math.max(1, ...series.flatMap((s) => s.counts));
-
-  // viewBox space; strokes use non-scaling-stroke so they stay crisp at any width.
-  const W = 560, H = 190, padL = 12, padR = 12, padT = 12, padB = 12;
-  const plotW = W - padL - padR;
-  const plotH = H - padT - padB;
-  const px = (i: number) => padL + (i / (days - 1)) * plotW;
-  const py = (v: number) => padT + plotH - (v / maxY) * plotH;
-  const dateLabel = (i: number) => {
-    const d = new Date(startMs + i * DAY_MS);
-    return `${d.getMonth() + 1}/${d.getDate()}`;
+  const clock = (ms: number) => {
+    const d = new Date(ms);
+    return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
   };
 
   return (
@@ -572,35 +561,28 @@ function ActivityChart({ events, t }: { events: EventItem[]; t: Dict }) {
         <p className="chart-empty">{t.chartEmpty}</p>
       ) : (
         <>
-          <p className="chart-sub">{t.chartSub(maxY)}</p>
-          <svg className="line-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={t.chartSub(maxY)}>
-            <line className="grid-line" x1={padL} y1={py(0)} x2={W - padR} y2={py(0)} vectorEffect="non-scaling-stroke" />
-            <line className="grid-line grid-top" x1={padL} y1={py(maxY)} x2={W - padR} y2={py(maxY)} vectorEffect="non-scaling-stroke" />
+          <p className="chart-sub">{t.chartSub}</p>
+          <div className="lane-chart" role="img" aria-label={t.chartSub}>
             {series.map((s) => (
-              <g key={s.id}>
-                <polyline
-                  className="series-line"
-                  points={s.counts.map((v, i) => `${px(i)},${py(v)}`).join(" ")}
-                  style={{ stroke: s.color }}
-                  vectorEffect="non-scaling-stroke"
-                />
-                {s.counts.map((v, i) =>
-                  v > 0 ? <circle key={i} r={3.5} cx={px(i)} cy={py(v)} style={{ fill: s.color }} /> : null,
-                )}
-              </g>
+              <div className="lane" key={s.id}>
+                <span className="lane-name">{s.name}</span>
+                <div className="lane-strip">
+                  {s.times.map((time, i) => (
+                    <i
+                      key={i}
+                      style={{ left: `${((time - startMs) / (24 * HOUR_MS)) * 100}%`, background: s.color }}
+                      title={clock(time)}
+                    />
+                  ))}
+                </div>
+                <b className="lane-count">{s.times.length}</b>
+              </div>
             ))}
-          </svg>
-          <div className="chart-axis">
-            <span>{dateLabel(0)}</span>
-            <span>{dateLabel(Math.floor((days - 1) / 2))}</span>
-            <span>{t.today}</span>
           </div>
-          <div className="chart-legend">
-            {series.map((s) => (
-              <span key={s.id} className="legend-item">
-                <i style={{ background: s.color }} />{s.name}<b>{s.total}</b>
-              </span>
-            ))}
+          <div className="chart-axis">
+            <span>{clock(startMs)}</span>
+            <span>{clock(startMs + 12 * HOUR_MS)}</span>
+            <span>{t.nowLabel}</span>
           </div>
         </>
       )}
@@ -1119,7 +1101,7 @@ function App() {
           <div className="timeline">
             {state.events.length === 0 ? (
               <p className="timeline-empty">{t.histEmpty}</p>
-            ) : state.events.slice(0, 8).map((item) => (
+            ) : state.events.slice(0, 10).map((item) => (
               <article className="timeline-item" key={item.id}>
                 <span className={`timeline-mark mark-${item.kind}`} />
                 <time>{formatDate(item.created_at, lang, t)}</time>
