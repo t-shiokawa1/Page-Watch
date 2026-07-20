@@ -78,6 +78,8 @@ const T = {
     watchKicker: "監視中",
     watchTitle: "監視リスト",
     checkAll: "すべて確認",
+    expandAria: "詳細を開閉",
+    detailHistory: "このサイトの更新履歴",
     loadingList: "読み込んでいます",
     emptyList: "最初の監視サイトを上のフォームから追加してください。",
     lastChecked: "最終確認",
@@ -230,6 +232,8 @@ const T = {
     watchKicker: "Watching now",
     watchTitle: "Watch list",
     checkAll: "Check all",
+    expandAria: "Toggle details",
+    detailHistory: "This site's history",
     loadingList: "Loading",
     emptyList: "Add your first site from the form above.",
     lastChecked: "Last checked",
@@ -553,7 +557,8 @@ type ChartSeries = { id: number; name: string; color: string; points: ChartDatum
 
 // Change-activity view with switchable shapes (lanes / cumulative / by-hour)
 // and an adjustable time window. "changed" events are the only series we keep.
-function ActivityChart({ events, t, lang }: { events: EventItem[]; t: Dict; lang: Lang }) {
+// `compact` drops the big header for embedding inside an expanded site row.
+function ActivityChart({ events, t, lang, compact }: { events: EventItem[]; t: Dict; lang: Lang; compact?: boolean }) {
   const [view, setView] = useState<ChartView>("lanes");
   const [rangeH, setRangeH] = useState(24);
   const now = Date.now();
@@ -591,11 +596,13 @@ function ActivityChart({ events, t, lang }: { events: EventItem[]; t: Dict; lang
   const sub = view === "lanes" ? t.subLanes : view === "cumulative" ? t.subCumulative : t.subHours;
 
   return (
-    <section className="chart-card" aria-labelledby="chart-title">
-      <div className="chart-head">
-        <div><p className="eyebrow">{t.chartKicker}</p><h2 id="chart-title">{t.chartTitle}</h2></div>
-        <span className="chart-total">{total}<small>{t.chartUnit}</small></span>
-      </div>
+    <section className={`chart-card${compact ? " chart-card-compact" : ""}`} aria-label={t.chartTitle}>
+      {!compact && (
+        <div className="chart-head">
+          <div><p className="eyebrow">{t.chartKicker}</p><h2>{t.chartTitle}</h2></div>
+          <span className="chart-total">{total}<small>{t.chartUnit}</small></span>
+        </div>
+      )}
 
       <div className="chart-controls">
         <div className="seg" role="tablist" aria-label={t.viewAria}>
@@ -714,6 +721,27 @@ function CumulativeView({ series, startMs, spanMs, now, clock }: { series: Chart
   );
 }
 
+// Always-on row sparkline: this site's change detections over the last 7 days,
+// dots placed by time and sized by magnitude. A quick "how active lately" cue.
+function MiniTrend({ events, days = 7 }: { events: EventItem[]; days?: number }) {
+  const now = Date.now();
+  const span = days * 24 * HOUR_MS;
+  const start = now - span;
+  const pts = events
+    .filter((e) => e.kind === "changed")
+    .map((e) => ({ t: Date.parse(e.created_at), mag: eventMagnitude(e.summary) }))
+    .filter((p) => p.t >= start);
+  const maxMag = Math.max(1, ...pts.map((p) => p.mag));
+  return (
+    <div className="mini-trend" aria-hidden="true">
+      {pts.map((p, i) => {
+        const d = 4 + 5 * Math.sqrt(p.mag / maxMag);
+        return <i key={i} style={{ left: `${((p.t - start) / span) * 100}%`, width: d, height: d }} />;
+      })}
+    </div>
+  );
+}
+
 // C: punchcard — site × hour-of-day, cell opacity ∝ magnitude in that hour.
 function HoursView({ series }: { series: ChartSeries[] }) {
   const maxCell = Math.max(
@@ -773,6 +801,18 @@ function App() {
   const [connError, setConnError] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  // Events grouped by site, so each row can show its own trend + history.
+  const eventsBySite = useMemo(() => {
+    const map = new Map<number, EventItem[]>();
+    for (const event of state.events) {
+      const list = map.get(event.site_id);
+      if (list) list.push(event);
+      else map.set(event.site_id, [event]);
+    }
+    return map;
+  }, [state.events]);
 
   // "Seen" markers for changed sites, kept per-browser (like the cloud token).
   // We remember which change was acknowledged — the site's last_changed stamp —
@@ -1133,7 +1173,6 @@ function App() {
         </aside>
 
         <div className="content">
-        <ActivityChart events={state.events} t={t} lang={lang} />
         <section className="dashboard-section" aria-labelledby="watch-title">
           <div className="section-title-row">
             <div className="title-with-index">
@@ -1160,8 +1199,28 @@ function App() {
               <div className="empty-state"><span className="loader" /> {t.loadingList}</div>
             ) : state.sites.length === 0 ? (
               <div className="empty-state">{t.emptyList}</div>
-            ) : state.sites.map((site) => (
-              <article className={`site-row ${!site.enabled ? "site-paused" : ""}`} key={site.id}>
+            ) : state.sites.map((site) => {
+              const siteEvents = eventsBySite.get(site.id) ?? [];
+              const open = expandedId === site.id;
+              const toggle = () => setExpandedId(open ? null : site.id);
+              return (
+              <div className="site-group" key={site.id}>
+              <article
+                className={`site-row ${!site.enabled ? "site-paused" : ""} ${open ? "site-open" : ""}`}
+                onClick={(e) => {
+                  // Clicking anywhere on the row expands it, except on the
+                  // controls it already carries (rename, badge, link, select…).
+                  if (!(e.target as HTMLElement).closest('button, a, select, input, [role="button"]')) toggle();
+                }}
+              >
+                <button
+                  className="row-chevron"
+                  onClick={(e) => { e.stopPropagation(); toggle(); }}
+                  aria-expanded={open}
+                  aria-label={t.expandAria}
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+                </button>
                 <SiteIcon site={site} />
                 <div className="site-info">
                   <div className="site-name-line">
@@ -1228,6 +1287,7 @@ function App() {
                     )}
                   </select>
                 </div>
+                <MiniTrend events={siteEvents} />
                 <div className="site-actions">
                   <button
                     onClick={() => run(`check-${site.id}`, () => backend.checkSite(site))}
@@ -1248,30 +1308,31 @@ function App() {
                   <button className="danger-action" onClick={() => deleteSite(site)} disabled={busy === `delete-${site.id}`} title={t.del} aria-label={t.del}><IconTrash /></button>
                 </div>
               </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="history-section" aria-labelledby="history-title">
-          <div className="title-with-index">
-            <div><p className="eyebrow">{t.histKicker}</p><h2 id="history-title">{t.histTitle}</h2></div>
-          </div>
-          <div className="timeline">
-            {state.events.length === 0 ? (
-              <p className="timeline-empty">{t.histEmpty}</p>
-            ) : state.events.slice(0, 10).map((item) => (
-              <article className="timeline-item" key={item.id}>
-                <span className={`timeline-mark mark-${item.kind}`} />
-                <time>{formatDate(item.created_at, lang, t)}</time>
-                <div>
-                  <h3>{item.site_name}</h3>
-                  <p>{item.summary}</p>
+              {open && (
+                <div className="site-detail">
+                  <ActivityChart events={siteEvents} t={t} lang={lang} compact />
+                  <div className="detail-history">
+                    <p className="eyebrow">{t.detailHistory}</p>
+                    <div className="timeline">
+                      {siteEvents.length === 0 ? (
+                        <p className="timeline-empty">{t.histEmpty}</p>
+                      ) : siteEvents.slice(0, 8).map((item) => (
+                        <article className="timeline-item" key={item.id}>
+                          <span className={`timeline-mark mark-${item.kind}`} />
+                          <time>{formatDate(item.created_at, lang, t)}</time>
+                          <p>{item.summary}</p>
+                          <span className="event-label">
+                            {item.kind === "changed" ? t.evChanged : item.kind === "error" ? t.evError : item.kind === "baseline" ? t.evBaseline : t.evNotify}
+                          </span>
+                        </article>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-                <span className="event-label">
-                  {item.kind === "changed" ? t.evChanged : item.kind === "error" ? t.evError : item.kind === "baseline" ? t.evBaseline : t.evNotify}
-                </span>
-              </article>
-            ))}
+              )}
+              </div>
+              );
+            })}
           </div>
         </section>
         </div>
