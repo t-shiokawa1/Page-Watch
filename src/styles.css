@@ -267,6 +267,9 @@ main { max-width: 1500px; margin: 0 auto; padding: 0 clamp(18px, 4vw, 60px) 16px
 /* A changed badge is also the acknowledge button. */
 button.status-badge { margin: 0; font-family: inherit; appearance: none; cursor: pointer; transition: .15s; }
 .status-ack:hover { box-shadow: 0 1px 0 var(--shadow); transform: translateY(-1px); }
+/* Always-visible "last read" note beside the badge. */
+.since-note { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.since-new { color: var(--orange); font-weight: 600; }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #999; }
 .status-icon { flex-shrink: 0; display: block; margin: -1px 0; }
 .status-good .status-dot { background: #51a53e; }

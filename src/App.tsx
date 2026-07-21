@@ -128,6 +128,8 @@ const T = {
     } as Record<string, string>,
     ackHint: "クリックで既読にする",
     ackAll: "すべて既読に",
+    seenAt: (time: string) => `既読 ${time}`,
+    sinceUpdates: (time: string, n: number) => `${time}以来 ${n}件更新`,
     tAddCloud: "クラウドのモニターリストに追加しました。初回チェックを開始します。",
     tAddLocal: "モニターサイトを追加しました。最初の比較基準を作成します。",
     confirmDelete: (name: string) => `「${name}」と更新履歴を削除しますか？`,
@@ -282,6 +284,8 @@ const T = {
     } as Record<string, string>,
     ackHint: "Click to mark as seen",
     ackAll: "Mark all seen",
+    seenAt: (time: string) => `Seen ${time}`,
+    sinceUpdates: (time: string, n: number) => `${n} update${n === 1 ? "" : "s"} since ${time}`,
     tAddCloud: "Added to the cloud watch list. Running the first check now.",
     tAddLocal: "Site added. Creating the first baseline for comparison.",
     confirmDelete: (name: string) => `Delete “${name}” and its update history?`,
@@ -851,6 +855,14 @@ function App() {
   // When the site was last marked read — kept even after a newer change flips it
   // back to "changed", so the chart can show "updates since you last looked".
   const lastAckAt = (site: Site) => acks[String(site.id)]?.at || "";
+  // How many changes were detected after the site was last marked read.
+  const updatesSince = (site: Site, sinceIso: string) => {
+    if (!sinceIso) return 0;
+    const since = Date.parse(sinceIso);
+    return (eventsBySite.get(site.id) ?? []).filter(
+      (e) => e.kind === "changed" && Date.parse(e.created_at) > since,
+    ).length;
+  };
   const displayStatus = (site: Site) => (isAcked(site) ? "seen" : site.status);
   const unackedChanged = state.sites.filter((s) => s.status === "changed" && !isAcked(s));
 
@@ -1218,6 +1230,8 @@ function App() {
               const siteEvents = eventsBySite.get(site.id) ?? [];
               const open = expandedId === site.id;
               const toggle = () => setExpandedId(open ? null : site.id);
+              const ackAt = lastAckAt(site);
+              const sinceCount = updatesSince(site, ackAt);
               return (
               <div className="site-group" key={site.id}>
               <article
@@ -1274,8 +1288,14 @@ function App() {
                       status={displayStatus(site)}
                       t={t}
                       onAck={site.status === "changed" && !isAcked(site) ? () => ackSite(site) : undefined}
-                      title={isAcked(site) && lastAckAt(site) ? `${t.status.seen}: ${formatDate(lastAckAt(site), lang, t)}` : undefined}
                     />
+                    {ackAt && (
+                      sinceCount > 0 ? (
+                        <span className="since-note since-new">{t.sinceUpdates(formatDate(ackAt, lang, t), sinceCount)}</span>
+                      ) : (
+                        <span className="since-note">{t.seenAt(formatDate(ackAt, lang, t))}</span>
+                      )
+                    )}
                   </div>
                   <a href={site.url} target="_blank" rel="noreferrer">{hostname(site.url)} <span>↗</span></a>
                   {site.last_error && <p className="site-error">{site.last_error}</p>}
