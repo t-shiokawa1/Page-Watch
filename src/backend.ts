@@ -269,6 +269,14 @@ async function readSites(): Promise<{ sites: CloudSiteRecord[]; sha: string }> {
   return { sites: JSON.parse(decodeContent(file.content)), sha: file.sha };
 }
 
+async function readCloudState(): Promise<{ sites?: Record<string, CloudStateEntry>; events?: EventItem[] }> {
+  // Ask the Contents endpoint only for the blob SHA.  Its base64 body is
+  // unavailable after 1 MB, while the Git Blob endpoint can return the same
+  // object in raw form without the large-file Contents response limitation.
+  const file = await gh<{ sha: string }>(`/repos/${DATA_OWNER}/${DATA_REPO}/contents/state.json`);
+  return JSON.parse(await ghRaw(`/repos/${DATA_OWNER}/${DATA_REPO}/git/blobs/${file.sha}`));
+}
+
 async function writeSites(sites: CloudSiteRecord[], sha: string, message: string): Promise<void> {
   await gh(`/repos/${DATA_OWNER}/${DATA_REPO}/contents/sites.json`, {
     method: "PUT",
@@ -301,7 +309,7 @@ export class CloudBackend implements Backend {
     const { sites } = await readSites();
     let cloudState: { sites?: Record<string, CloudStateEntry>; events?: EventItem[] } = {};
     try {
-      cloudState = JSON.parse(await ghRaw(`/repos/${DATA_OWNER}/${DATA_REPO}/contents/state.json`));
+      cloudState = await readCloudState();
     } catch {
       // state.json not created yet: first check has not run.
     }
