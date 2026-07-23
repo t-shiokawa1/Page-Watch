@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from email.message import EmailMessage
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urljoin, urlparse
 from urllib.request import Request, urlopen
@@ -47,6 +47,8 @@ DEFAULT_ALLOWED_ORIGINS = {
     "http://localhost:5173",
 }
 MAX_PAGE_BYTES = 10 * 1024 * 1024
+MAX_DISCOVERED_PAGES = 40
+DISCOVERY_DEPTH = 2
 CHECK_LOCK = threading.Lock()
 STOP_EVENT = threading.Event()
 
@@ -95,6 +97,8 @@ def init_database() -> None:
                 last_modified TEXT,
                 content_hash TEXT,
                 snapshot TEXT,
+                urls_json TEXT,
+                page_states_json TEXT,
                 created_at TEXT NOT NULL
             );
 
@@ -111,6 +115,11 @@ def init_database() -> None:
                 ON events(site_id, created_at DESC);
             """
         )
+        columns = {row[1] for row in db.execute("PRAGMA table_info(sites)")}
+        if "urls_json" not in columns:
+            db.execute("ALTER TABLE sites ADD COLUMN urls_json TEXT")
+        if "page_states_json" not in columns:
+            db.execute("ALTER TABLE sites ADD COLUMN page_states_json TEXT")
         count = db.execute("SELECT COUNT(*) FROM sites").fetchone()[0]
         if count == 0:
             db.execute(
@@ -299,6 +308,110 @@ def normalize_content(content: str, content_type: str, base_url: str) -> str:
     raise RuntimeError(f"対応していない形式です: {content_type or 'Content-Type不明'}")
 
 
+def canonical_url(raw_url: str, base_url: str = "") -> str:
+    """Make a stable page URL; fragments never identify different content."""
+    parsed = urlparse(urljoin(base_url, raw_url))
+    return parsed._replace(fragment="").geturl()
+
+
+def is_page_url(url: str) -> bool:
+    """Avoid adding downloads and static assets to a website monitor."""
+    path = urlparse(url).path.lower()
+    return not path.endswith((
+        ".7z", ".avi", ".css", ".csv", ".doc", ".docx", ".gif", ".gz",
+        ".ico", ".jpeg", ".jpg", ".js", ".mov", ".mp3", ".mp4", ".pdf",
+        ".png", ".ppt", ".pptx", ".svg", ".tar", ".webp", ".xls", ".xlsx", ".zip",
+    ))
+
+
+class InternalLinkParser(HTMLParser):
+    """Collect navigable links without treating scripts or external domains as pages."""
+
+    def __init__(self, base_url: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.base_url = base_url
+        self.base = urlparse(base_url)
+        self.links: List[str] = []
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        if tag != "a":
+            return
+        href = dict(attrs).get("href", "") or ""
+        candidate = canonical_url(href, self.base_url)
+        parsed = urlparse(candidate)
+        if (
+            parsed.scheme in {"http", "https"}
+            and parsed.netloc == self.base.netloc
+            and is_page_url(candidate)
+            and candidate not in self.links
+        ):
+            self.links.append(candidate)
+
+
+def extract_internal_links(html_text: str, base_url: str) -> List[str]:
+    parser = InternalLinkParser(base_url)
+    parser.feed(html_text)
+    parser.close()
+    return parser.links
+
+
+def discover_internal_urls(root_url: str) -> List[str]:
+    """Crawl a small, same-origin navigation tree when a site is first added."""
+    root = canonical_url(root_url)
+    found: List[str] = [root]
+    queue: List[Tuple[str, int]] = [(root, 0)]
+    visited: Set[str] = set()
+    while queue and len(found) < MAX_DISCOVERED_PAGES:
+        current, depth = queue.pop(0)
+        if current in visited:
+            continue
+        visited.add(current)
+        try:
+            html_text, headers = fetch_site({"url": current, "etag": "", "last_modified": ""})
+        except Exception:
+            continue
+        if depth >= DISCOVERY_DEPTH or "html" not in headers.get("content_type", "").lower():
+            continue
+        for link in extract_internal_links(html_text, current):
+            if link not in found:
+                found.append(link)
+                queue.append((link, depth + 1))
+                if len(found) >= MAX_DISCOVERED_PAGES:
+                    break
+    return found
+
+
+def site_urls(site: Any) -> List[str]:
+    try:
+        raw = json.loads(site["urls_json"] or "[]")
+        urls = [canonical_url(str(value)) for value in raw if isinstance(value, str)]
+    except (KeyError, TypeError, json.JSONDecodeError):
+        urls = []
+    root = canonical_url(site["url"])
+    return list(dict.fromkeys([root, *urls]))
+
+
+def page_states(site: Any) -> Dict[str, Dict[str, Any]]:
+    try:
+        raw = json.loads(site["page_states_json"] or "{}")
+        if isinstance(raw, dict):
+            return {str(url): value for url, value in raw.items() if isinstance(value, dict)}
+    except (KeyError, TypeError, json.JSONDecodeError):
+        pass
+    # Migration path for a pre-multi-page row: its stored snapshot belongs to
+    # the root URL and remains a valid comparison baseline.
+    if site["content_hash"]:
+        return {
+            canonical_url(site["url"]): {
+                "etag": site["etag"] or "",
+                "last_modified": site["last_modified"] or "",
+                "content_hash": site["content_hash"],
+                "snapshot": site["snapshot"] or "",
+            }
+        }
+    return {}
+
+
 def decode_page(raw: bytes, content_type: str) -> str:
     match = re.search(r"charset=([\w-]+)", content_type, flags=re.IGNORECASE)
     candidates = [match.group(1)] if match else []
@@ -311,7 +424,7 @@ def decode_page(raw: bytes, content_type: str) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
-def fetch_site(site: sqlite3.Row) -> Tuple[str, Dict[str, str]]:
+def fetch_site(site: Any) -> Tuple[str, Dict[str, str]]:
     headers = {
         "User-Agent": USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.5",
@@ -497,92 +610,95 @@ def check_site(site_id: int) -> Dict[str, Any]:
             db.execute("UPDATE sites SET status = 'checking', last_error = NULL WHERE id = ?", (site_id,))
 
         try:
-            html_text, headers = fetch_site(site)
             checked_at = now_iso()
+            states = page_states(site)
+            urls = site_urls(site)
+            # A database created by an older PageWatch release has no URL list.
+            # Discover it on the next check so it gains the new behavior too.
+            if site["urls_json"] is None:
+                urls = discover_internal_urls(site["url"])
+                with db_connect() as db:
+                    db.execute("UPDATE sites SET urls_json = ? WHERE id = ?", (json.dumps(urls), site_id))
+            outcomes: List[str] = []
+            changed_pages: List[Tuple[str, str]] = []
+            errors: List[str] = []
+            for page_url in urls:
+                previous = states.get(page_url, {})
+                try:
+                    html_text, headers = fetch_site({
+                        "url": page_url,
+                        "etag": previous.get("etag", ""),
+                        "last_modified": previous.get("last_modified", ""),
+                    })
+                    if headers.get("not_modified"):
+                        outcomes.append("unchanged")
+                        continue
+                    snapshot = normalize_content(html_text, headers.get("content_type", "text/html"), page_url)
+                    if not snapshot:
+                        raise RuntimeError("比較できる表示内容が見つかりません")
+                    content_hash = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()
+                    next_state = {
+                        "etag": headers.get("etag", ""),
+                        "last_modified": headers.get("last_modified", ""),
+                        "content_hash": content_hash,
+                        "snapshot": snapshot,
+                    }
+                    if not previous.get("content_hash"):
+                        states[page_url] = next_state
+                        outcomes.append("baseline")
+                    elif previous.get("content_hash") == content_hash:
+                        states[page_url] = next_state
+                        outcomes.append("unchanged")
+                    else:
+                        added, removed = content_change(previous.get("snapshot", ""), snapshot)
+                        states[page_url] = next_state
+                        if not added and not removed:
+                            outcomes.append("unchanged")
+                        else:
+                            changed_pages.append((page_url, summarize_changes(added, removed)))
+                            outcomes.append("changed")
+                except Exception as exc:
+                    errors.append(f"{page_url}: {str(exc)[:300]}")
+                    outcomes.append("error")
+
+            if changed_pages:
+                status = "changed"
+                summary = "\n\n".join(f"[{url}]\n{change}" for url, change in changed_pages)
+            elif errors:
+                status = "error"
+                summary = errors[0]
+            elif "baseline" in outcomes:
+                status = "baseline"
+                summary = f"{len(outcomes)}ページの初回の比較基準を保存しました"
+            else:
+                status = "unchanged"
+                summary = ""
+
             with db_connect() as db:
-                if headers.get("not_modified"):
-                    db.execute(
-                        "UPDATE sites SET status = 'unchanged', last_checked = ?, last_error = NULL WHERE id = ?",
-                        (checked_at, site_id),
-                    )
-                    return {"changed": False, "status": "unchanged"}
-
-                snapshot = normalize_content(html_text, headers.get("content_type", "text/html"), site["url"])
-                if not snapshot:
-                    raise RuntimeError("比較できる表示内容が見つかりません")
-                content_hash = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()
-                previous_hash = site["content_hash"]
-                common_values = (
-                    checked_at,
-                    headers.get("etag", ""),
-                    headers.get("last_modified", ""),
-                    content_hash,
-                    snapshot,
-                    site_id,
-                )
-                if previous_hash is None:
-                    db.execute(
-                        """
-                        UPDATE sites SET status = 'baseline', last_checked = ?, last_error = NULL,
-                            etag = ?, last_modified = ?, content_hash = ?, snapshot = ?
-                        WHERE id = ?
-                        """,
-                        common_values,
-                    )
-                    add_event(db, site_id, "baseline", "初回の比較基準を保存しました")
-                    return {"changed": False, "status": "baseline"}
-
-                if previous_hash == content_hash:
-                    db.execute(
-                        """
-                        UPDATE sites SET status = 'unchanged', last_checked = ?, last_error = NULL,
-                            etag = ?, last_modified = ?, content_hash = ?, snapshot = ?
-                        WHERE id = ?
-                        """,
-                        common_values,
-                    )
-                    return {"changed": False, "status": "unchanged"}
-
-                added, removed = content_change(site["snapshot"] or "", snapshot)
-                if not added and not removed:
-                    # Only the order of identical text changed: absorb it silently
-                    # as the new baseline instead of reporting a false update.
-                    db.execute(
-                        """
-                        UPDATE sites SET status = 'unchanged', last_checked = ?, last_error = NULL,
-                            etag = ?, last_modified = ?, content_hash = ?, snapshot = ?
-                        WHERE id = ?
-                        """,
-                        common_values,
-                    )
-                    return {"changed": False, "status": "unchanged"}
-
-                summary = summarize_changes(added, removed)
                 db.execute(
                     """
-                    UPDATE sites SET status = 'changed', last_checked = ?, last_changed = ?,
-                        last_error = NULL, etag = ?, last_modified = ?, content_hash = ?, snapshot = ?
+                    UPDATE sites SET status = ?, last_checked = ?,
+                        last_changed = CASE WHEN ? = 'changed' THEN ? ELSE last_changed END,
+                        last_error = ?, page_states_json = ?
                     WHERE id = ?
                     """,
                     (
-                        checked_at,
-                        checked_at,
-                        headers.get("etag", ""),
-                        headers.get("last_modified", ""),
-                        content_hash,
-                        snapshot,
-                        site_id,
+                        status, checked_at, status, checked_at,
+                        errors[0] if errors else None,
+                        json.dumps(states, ensure_ascii=False), site_id,
                     ),
                 )
-                add_event(db, site_id, "changed", summary)
+                if status in {"changed", "baseline", "error"}:
+                    add_event(db, site_id, status, summary)
 
-            try:
-                notify_change(site, summary)
-            except Exception as exc:  # Notification failure must not undo monitoring state.
-                logging.exception("Notification failed")
-                with db_connect() as db:
-                    add_event(db, site_id, "notification_error", f"通知に失敗しました: {exc}")
-            return {"changed": True, "status": "changed", "summary": summary}
+            if status == "changed":
+                try:
+                    notify_change(site, summary)
+                except Exception as exc:  # Notification failure must not undo monitoring state.
+                    logging.exception("Notification failed")
+                    with db_connect() as db:
+                        add_event(db, site_id, "notification_error", f"通知に失敗しました: {exc}")
+            return {"changed": status == "changed", "status": status, "summary": summary}
         except Exception as exc:
             logging.exception("Check failed for site %s", site_id)
             with db_connect() as db:
@@ -606,6 +722,18 @@ def check_all_enabled() -> None:
             check_site(site_id)
         except RuntimeError:
             continue
+
+
+def discover_and_check(site_id: int) -> None:
+    """Populate a newly added site's internal pages, then establish baselines."""
+    with db_connect() as db:
+        site = db.execute("SELECT * FROM sites WHERE id = ?", (site_id,)).fetchone()
+    if site is None:
+        return
+    discovered = discover_internal_urls(site["url"])
+    with db_connect() as db:
+        db.execute("UPDATE sites SET urls_json = ? WHERE id = ?", (json.dumps(discovered), site_id))
+    check_site(site_id)
 
 
 def parse_iso(value: Optional[str]) -> Optional[datetime]:
@@ -639,11 +767,19 @@ def site_rows() -> List[Dict[str, Any]]:
         rows = db.execute(
             """
             SELECT id, name, url, interval_minutes, enabled, status, last_checked,
-                   last_changed, last_error, created_at
+                   last_changed, last_error, etag, last_modified, content_hash, snapshot,
+                   urls_json, page_states_json, created_at
             FROM sites ORDER BY enabled DESC, created_at DESC
             """
         ).fetchall()
-    return [dict(row) for row in rows]
+    result = []
+    for row in rows:
+        item = dict(row)
+        urls = site_urls(row)
+        item["urls"] = urls
+        item["page_count"] = len(urls)
+        result.append(item)
+    return result
 
 
 def event_rows(limit: int = 50) -> List[Dict[str, Any]]:
@@ -774,8 +910,28 @@ class PageWatchHandler(BaseHTTPRequestHandler):
                         site_id = cursor.lastrowid
                 except sqlite3.IntegrityError as exc:
                     raise ValueError("このURLはすでに登録されています") from exc
-                threading.Thread(target=self.safe_check, args=(site_id,), daemon=True).start()
+                threading.Thread(target=self.safe_discover_and_check, args=(site_id,), daemon=True).start()
                 self.send_json({"ok": True, "id": site_id}, 201)
+                return
+            page_match = re.fullmatch(r"/api/sites/(\d+)/pages", path)
+            if page_match:
+                site_id = int(page_match.group(1))
+                raw_urls = data.get("urls", data.get("url", ""))
+                candidates = raw_urls if isinstance(raw_urls, list) else [raw_urls]
+                urls: List[str] = []
+                for raw_url in candidates:
+                    parsed = urlparse(str(raw_url).strip())
+                    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                        raise ValueError("http:// または https:// から始まるURLを入力してください")
+                    urls.append(canonical_url(str(raw_url).strip()))
+                with db_connect() as db:
+                    site = db.execute("SELECT * FROM sites WHERE id = ?", (site_id,)).fetchone()
+                    if site is None:
+                        raise KeyError("監視サイトが見つかりません")
+                    merged = list(dict.fromkeys([*site_urls(site), *urls]))
+                    db.execute("UPDATE sites SET urls_json = ? WHERE id = ?", (json.dumps(merged), site_id))
+                threading.Thread(target=self.safe_check, args=(site_id,), daemon=True).start()
+                self.send_json({"ok": True, "count": len(merged)})
                 return
             if path == "/api/check-all":
                 threading.Thread(target=check_all_enabled, daemon=True).start()
@@ -810,6 +966,13 @@ class PageWatchHandler(BaseHTTPRequestHandler):
         time.sleep(0.2)
         try:
             check_site(site_id)
+        except RuntimeError:
+            pass
+
+    def safe_discover_and_check(self, site_id: int) -> None:
+        time.sleep(0.2)
+        try:
+            discover_and_check(site_id)
         except RuntimeError:
             pass
 

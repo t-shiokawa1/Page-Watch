@@ -12,6 +12,8 @@ export type Site = {
   last_checked: string | null;
   last_changed: string | null;
   last_error: string | null;
+  urls: string[];
+  page_count: number;
 };
 
 export type EventItem = {
@@ -51,6 +53,7 @@ export interface Backend {
   intervalChoices: { value: number; label: string }[];
   loadState(): Promise<AppState>;
   addSite(input: { name: string; url: string; interval_minutes: number }): Promise<void>;
+  addPage(site: Site, url: string): Promise<void>;
   checkSite(site: Site): Promise<string>;
   checkAll(): Promise<string>;
   toggleSite(site: Site): Promise<void>;
@@ -101,6 +104,13 @@ export class LocalBackend implements Backend {
 
   async addSite(input: { name: string; url: string; interval_minutes: number }): Promise<void> {
     await localApi("/api/sites", { method: "POST", body: JSON.stringify(input) });
+  }
+
+  async addPage(site: Site, url: string): Promise<void> {
+    await localApi(`/api/sites/${site.id}/pages`, {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    });
   }
 
   async checkSite(site: Site): Promise<string> {
@@ -181,6 +191,8 @@ type CloudSiteRecord = {
   name: string;
   interval_minutes: number;
   enabled: boolean;
+  urls?: string[];
+  auto_discover?: boolean;
 };
 
 type CloudStateEntry = {
@@ -290,6 +302,8 @@ export class CloudBackend implements Backend {
         last_checked: entry.last_checked || null,
         last_changed: entry.last_changed || null,
         last_error: entry.last_error || null,
+        urls: site.urls?.length ? site.urls : [site.url],
+        page_count: site.urls?.length || 1,
       };
     });
     return {
@@ -320,9 +334,25 @@ export class CloudBackend implements Backend {
       name: input.name.trim() || parsed.hostname,
       interval_minutes: Math.max(this.minInterval, input.interval_minutes),
       enabled: true,
+      urls: [input.url],
+      auto_discover: true,
     };
     await writeSites([...sites, record], sha, `add: ${record.name}`);
     await dispatchCheck({ only: String(record.id) });
+  }
+
+  async addPage(site: Site, url: string): Promise<void> {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error("http:// または https:// から始まるURLを入力してください");
+    }
+    const { sites, sha } = await readSites();
+    const next = sites.map((record) => record.id === site.id ? {
+      ...record,
+      urls: Array.from(new Set([...(record.urls?.length ? record.urls : [record.url]), url])),
+    } : record);
+    await writeSites(next, sha, `add page: ${site.name}`);
+    await dispatchCheck({ only: String(site.id) });
   }
 
   async checkSite(site: Site): Promise<string> {

@@ -8,6 +8,14 @@ import server
 
 
 class VisibleContentTests(unittest.TestCase):
+    def test_extracts_same_site_page_links_and_skips_assets(self):
+        links = server.extract_internal_links(
+            '<a href="/whats-new/">News</a><a href="research-2/">Research</a>'
+            '<a href="/file.pdf">PDF</a><a href="https://outside.example/page">Outside</a>',
+            "https://example.com/",
+        )
+        self.assertEqual(links, ["https://example.com/whats-new/", "https://example.com/research-2/"])
+
     def test_ignores_scripts_styles_and_hidden_content(self):
         source = """
         <html><head><title>Hidden title</title><style>.x{}</style></head>
@@ -141,6 +149,31 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(server.site_rows()[0]["status"], "unchanged")
             kinds = [e["kind"] for e in server.event_rows()]
             self.assertNotIn("changed", kinds)
+        finally:
+            server.fetch_site = original_fetch
+
+    def test_one_site_checks_multiple_pages_and_reports_the_changed_url(self):
+        server.init_database()
+        site_id = server.site_rows()[0]["id"]
+        with server.db_connect() as db:
+            db.execute(
+                "UPDATE sites SET urls_json = ? WHERE id = ?",
+                ('["https://fukazawa.icems.kyoto-u.ac.jp/", "https://fukazawa.icems.kyoto-u.ac.jp/whats-new/"]', site_id),
+            )
+        pages = {
+            "https://fukazawa.icems.kyoto-u.ac.jp/": "<p>Top</p>",
+            "https://fukazawa.icems.kyoto-u.ac.jp/whats-new/": "<p>Old news</p>",
+        }
+        original_fetch = server.fetch_site
+        server.save_settings({"desktop_notifications": False, "email_enabled": False})
+        try:
+            server.fetch_site = lambda page: (pages[page["url"]], {"etag": "", "last_modified": ""})
+            self.assertEqual(server.check_site(site_id)["status"], "baseline")
+            pages["https://fukazawa.icems.kyoto-u.ac.jp/whats-new/"] = "<p>New news</p>"
+            result = server.check_site(site_id)
+            self.assertTrue(result["changed"])
+            self.assertIn("whats-new", result["summary"])
+            self.assertIn("New news", result["summary"])
         finally:
             server.fetch_site = original_fetch
 

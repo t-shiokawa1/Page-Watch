@@ -65,6 +65,10 @@ const T = {
     addKicker: "新規追加",
     addTitle: "サイトを追加",
     fUrl: "サイトURL",
+    pages: (count: number) => `監視ページ ${count}件`,
+    pageUrls: "監視するURL",
+    pageUrl: "追加するURL",
+    addPage: "URLを追加",
     fName: "表示名",
     optional: "任意",
     phName: "ニュース",
@@ -143,6 +147,7 @@ const T = {
     tActionErr: "処理に失敗しました",
     tBadUrl: "http:// または https:// で始まるURLを入力してください。",
     tDupUrl: "このURLはすでに登録されています。",
+    tPageAdded: "監視URLを追加しました。比較基準を作成します。",
     every: (label: string) => `${label}ごと`,
     // setup: local offline
     loKicker: "はじめに / このMacでモニター",
@@ -221,6 +226,10 @@ const T = {
     addKicker: "Add a watch",
     addTitle: "Add a site",
     fUrl: "Site URL",
+    pages: (count: number) => `${count} monitored page${count === 1 ? "" : "s"}`,
+    pageUrls: "Monitored URLs",
+    pageUrl: "URL to add",
+    addPage: "Add URL",
     fName: "Display name",
     optional: "optional",
     phName: "News",
@@ -299,6 +308,7 @@ const T = {
     tActionErr: "Something went wrong.",
     tBadUrl: "Enter a URL that starts with http:// or https://.",
     tDupUrl: "This URL is already registered.",
+    tPageAdded: "Monitoring URL added. Creating its comparison baseline.",
     every: (label: string) => `every ${label}`,
     // setup: local offline
     loKicker: "Get started / This Mac",
@@ -816,6 +826,7 @@ function App() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [pageUrl, setPageUrl] = useState("");
 
   // Events grouped by site, so each row can show its own trend + history.
   const eventsBySite = useMemo(() => {
@@ -993,6 +1004,27 @@ function App() {
     run(`delete-${site.id}`, async () => {
       await backend.deleteSite(site);
       return t.tDeleted;
+    });
+  };
+
+  const addPage = (event: FormEvent, site: Site) => {
+    event.preventDefault();
+    const value = pageUrl.trim();
+    try {
+      const parsed = new URL(value);
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error();
+    } catch {
+      showMessage(t.tBadUrl);
+      return;
+    }
+    if (site.urls.includes(value)) {
+      showMessage(t.tDupUrl);
+      return;
+    }
+    run(`add-page-${site.id}`, async () => {
+      await backend.addPage(site, value);
+      setPageUrl("");
+      return t.tPageAdded;
     });
   };
 
@@ -1298,6 +1330,7 @@ function App() {
                     )}
                   </div>
                   <a href={site.url} target="_blank" rel="noreferrer">{hostname(site.url)} <span>↗</span></a>
+                  <small className="page-count">{t.pages(site.page_count)}</small>
                   {site.last_error && <p className="site-error">{site.last_error}</p>}
                 </div>
                 <div className="site-meta">
@@ -1346,6 +1379,27 @@ function App() {
               </article>
               {open && (
                 <div className="site-detail">
+                  <section className="page-manager">
+                    <p className="eyebrow">{t.pageUrls}</p>
+                    <ul>
+                      {site.urls.map((page) => (
+                        <li key={page}><a href={page} target="_blank" rel="noreferrer">{page}</a></li>
+                      ))}
+                    </ul>
+                    <form onSubmit={(event) => addPage(event, site)}>
+                      <input
+                        type="url"
+                        value={expandedId === site.id ? pageUrl : ""}
+                        onChange={(event) => setPageUrl(event.target.value)}
+                        placeholder="https://example.com/news"
+                        aria-label={t.pageUrl}
+                        required
+                      />
+                      <button type="submit" className="secondary-button" disabled={busy === `add-page-${site.id}`}>
+                        {t.addPage}
+                      </button>
+                    </form>
+                  </section>
                   <ActivityChart
                     events={siteEvents}
                     t={t}

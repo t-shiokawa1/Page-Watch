@@ -20,7 +20,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # server.py lives next to this file (the app repo checkout).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -90,68 +90,77 @@ def add_event(state: Dict[str, Any], site: Dict[str, Any], kind: str, summary: s
     del events[MAX_EVENTS:]
 
 
-def check_one(site: Dict[str, Any], entry: Dict[str, Any], state: Dict[str, Any], mail: Dict[str, Any]) -> str:
-    checked_at = now_iso()
-    fetch_input = {
-        "url": site["url"],
-        "etag": entry.get("etag", ""),
-        "last_modified": entry.get("last_modified", ""),
-    }
+def site_urls(site: Dict[str, Any]) -> List[str]:
+    urls = site.get("urls") or []
+    return list(dict.fromkeys([site["url"], *[str(url) for url in urls if isinstance(url, str)]]))
+
+
+def check_page(url: str, previous: Dict[str, Any]) -> Tuple[str, Optional[str], Dict[str, Any], Optional[str]]:
+    """Return outcome, summary, new state and a readable error for one URL."""
+    fetch_input = {"url": url, "etag": previous.get("etag", ""), "last_modified": previous.get("last_modified", "")}
     try:
         html_text, headers = server.fetch_site(fetch_input)
+        if headers.get("not_modified"):
+            return "unchanged", None, previous, None
+        snapshot = server.normalize_content(html_text, headers.get("content_type", "text/html"), url)
+        if not snapshot:
+            raise RuntimeError("比較できる表示内容が見つかりません")
+        content_hash = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()
+        next_entry = {
+            "etag": headers.get("etag", ""),
+            "last_modified": headers.get("last_modified", ""),
+            "content_hash": content_hash,
+            "snapshot": snapshot,
+        }
+        if not previous.get("content_hash"):
+            return "baseline", None, next_entry, None
+        if previous.get("content_hash") == content_hash:
+            return "unchanged", None, next_entry, None
+        added, removed = server.content_change(previous.get("snapshot") or "", snapshot)
+        if not added and not removed:
+            return "unchanged", None, next_entry, None
+        return "changed", server.summarize_changes(added, removed), next_entry, None
     except Exception as exc:
-        entry.update(status="error", last_checked=checked_at, last_error=str(exc)[:500])
-        add_event(state, site, "error", f"確認に失敗しました: {str(exc)[:500]}")
-        return "error"
+        return "error", None, previous, str(exc)[:500]
 
-    if headers.get("not_modified"):
-        entry.update(status="unchanged", last_checked=checked_at, last_error=None)
-        return "unchanged"
 
-    try:
-        snapshot = server.normalize_content(
-            html_text, headers.get("content_type", "text/html"), site["url"]
-        )
-    except RuntimeError as exc:
-        entry.update(status="error", last_checked=checked_at, last_error=str(exc)[:500])
-        add_event(state, site, "error", f"確認に失敗しました: {str(exc)[:500]}")
-        return "error"
-    if not snapshot:
-        entry.update(status="error", last_checked=checked_at, last_error="比較できる表示内容が見つかりません")
-        add_event(state, site, "error", "確認に失敗しました: 比較できる表示内容が見つかりません")
-        return "error"
+def check_one(site: Dict[str, Any], entry: Dict[str, Any], state: Dict[str, Any], mail: Dict[str, Any]) -> str:
+    checked_at = now_iso()
+    pages = entry.setdefault("pages", {})
+    # Preserve the root baseline written by older cloud versions.
+    if not pages and entry.get("content_hash"):
+        pages[site["url"]] = {key: entry.get(key, "") for key in ("etag", "last_modified", "content_hash", "snapshot")}
+    outcomes: List[str] = []
+    changed_pages: List[Tuple[str, str]] = []
+    errors: List[str] = []
+    for url in site_urls(site):
+        outcome, summary, next_page, error = check_page(url, pages.get(url, {}))
+        pages[url] = next_page
+        outcomes.append(outcome)
+        if summary:
+            changed_pages.append((url, summary))
+        if error:
+            errors.append(f"{url}: {error}")
 
-    content_hash = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()
-    previous_hash = entry.get("content_hash")
-    common = dict(
-        last_checked=checked_at,
-        last_error=None,
-        etag=headers.get("etag", ""),
-        last_modified=headers.get("last_modified", ""),
-        content_hash=content_hash,
-        snapshot=snapshot,
-    )
+    if changed_pages:
+        outcome = "changed"
+        summary = "\n\n".join(f"[{url}]\n{text}" for url, text in changed_pages)
+    elif errors:
+        outcome = "error"
+        summary = errors[0]
+    elif "baseline" in outcomes:
+        outcome = "baseline"
+        summary = f"{len(outcomes)}ページの初回の比較基準を保存しました"
+    else:
+        outcome = "unchanged"
+        summary = ""
+    entry.update(status=outcome, last_checked=checked_at, last_error=errors[0] if errors else None, pages=pages)
+    if outcome == "changed":
+        entry["last_changed"] = checked_at
+    if outcome in {"changed", "baseline", "error"}:
+        add_event(state, site, outcome, summary)
 
-    if previous_hash is None:
-        entry.update(status="baseline", **common)
-        add_event(state, site, "baseline", "初回の比較基準を保存しました")
-        return "baseline"
-
-    if previous_hash == content_hash:
-        entry.update(status="unchanged", **common)
-        return "unchanged"
-
-    added, removed = server.content_change(entry.get("snapshot") or "", snapshot)
-    if not added and not removed:
-        # Reorder-only: absorb silently, exactly like the local server.
-        entry.update(status="unchanged", **common)
-        return "unchanged"
-
-    summary = server.summarize_changes(added, removed)
-    entry.update(status="changed", last_changed=checked_at, **common)
-    add_event(state, site, "changed", summary)
-
-    if mail["email_enabled"]:
+    if outcome == "changed" and mail["email_enabled"]:
         try:
             server.send_email(
                 mail,
@@ -160,7 +169,7 @@ def check_one(site: Dict[str, Any], entry: Dict[str, Any], state: Dict[str, Any]
             )
         except Exception as exc:
             add_event(state, site, "notification_error", f"通知に失敗しました: {exc}")
-    return "changed"
+    return outcome
 
 
 def main() -> int:
@@ -171,7 +180,8 @@ def main() -> int:
     args = parser.parse_args()
 
     data_dir = Path(args.data).resolve()
-    sites: List[Dict[str, Any]] = load_json(data_dir / "sites.json", [])
+    sites_path = data_dir / "sites.json"
+    sites: List[Dict[str, Any]] = load_json(sites_path, [])
     state: Dict[str, Any] = load_json(data_dir / "state.json", {})
     state.setdefault("sites", {})
     state.setdefault("events", [])
@@ -191,9 +201,17 @@ def main() -> int:
             continue
         if not site.get("enabled", True) and not args.only:
             continue
+        if site.pop("auto_discover", False) or not site.get("urls"):
+            # The initial Action can safely fetch the public site; discovered
+            # URLs are then persisted in sites.json alongside the site group.
+            try:
+                site["urls"] = server.discover_internal_urls(site["url"])
+            except Exception:
+                site["urls"] = [site["url"]]
         results.append((site.get("name") or site["url"], check_one(site, entry, state, mail)))
 
     state["last_run"] = now_iso()
+    sites_path.write_text(json.dumps(sites, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     (data_dir / "state.json").write_text(
         json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8"
     )

@@ -238,6 +238,13 @@ main { max-width: 1500px; margin: 0 auto; padding: 0 clamp(18px, 4vw, 60px) 16px
 .mini-trend i { background: transparent; }
 /* expanded detail: this site's chart + history */
 .site-detail { padding: 6px 14px 16px 50px; display: grid; gap: 12px; background: var(--tile-wash); border-top: 1px dashed var(--line); }
+.page-manager { border: 1px solid var(--line); background: var(--white); padding: 10px; }
+.page-manager .eyebrow { margin-bottom: 6px; }
+.page-manager ul { max-height: 132px; overflow: auto; margin: 0 0 9px; padding-left: 18px; font: 11px ui-monospace, "SFMono-Regular", monospace; }
+.page-manager li { margin: 3px 0; overflow-wrap: anywhere; }
+.page-manager a { color: var(--muted); }
+.page-manager form { display: flex; gap: 6px; }
+.page-manager input { min-width: 0; flex: 1; border: 1px solid var(--line); padding: 7px 8px; font: 12px ui-monospace, "SFMono-Regular", monospace; }
 .detail-history .eyebrow { margin-bottom: 6px; }
 .detail-history .timeline { border-top: 0; }
 .detail-history .timeline-item { grid-template-columns: 14px 108px 1fr auto; min-height: 0; padding: 6px 0; }
@@ -262,6 +269,7 @@ main { max-width: 1500px; margin: 0 auto; padding: 0 clamp(18px, 4vw, 60px) 16px
 .name-edit { font-size: 15px; font-weight: 600; letter-spacing: -.02em; padding: 1px 5px; border: 1px solid var(--ink); border-radius: 0; background: var(--white); color: var(--ink); outline: none; max-width: 240px; box-shadow: inset 0 -2px 0 var(--acid); }
 .site-info > a { font: 400 11px ui-monospace, "SFMono-Regular", monospace; color: var(--muted); text-decoration: none; }
 .site-info > a:hover { color: var(--orange); }
+.page-count { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
 .site-error { margin: 4px 0 0; color: var(--error-fg); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 640px; }
 .status-badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 99px; font-size: 11px; white-space: nowrap; }
 /* A changed badge is also the acknowledge button. */
