@@ -231,6 +231,25 @@ async function gh<T>(path: string, options?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+// The Contents API omits the base64 body for files above 1 MB. state.json
+// contains page snapshots and can legitimately grow past that limit, so read
+// it using GitHub's raw representation instead of the JSON file envelope.
+async function ghRaw(path: string): Promise<string> {
+  const token = getCloudToken();
+  if (!token) throw new Error("クラウド用トークンが未設定です。右上の歯車から設定してください。");
+  const response = await fetch(`https://api.github.com${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github.raw+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+  if (response.status === 401) throw new Error("トークンが無効です。右上の歯車から設定し直してください。");
+  if (response.status === 404) throw new Error("クラウドの監視履歴が見つかりません。");
+  if (!response.ok) throw new Error(`GitHub APIエラー (${response.status})`);
+  return response.text();
+}
+
 function decodeContent(base64: string): string {
   const bytes = Uint8Array.from(atob(base64.replace(/\n/g, "")), (c) => c.charCodeAt(0));
   return new TextDecoder().decode(bytes);
@@ -282,10 +301,7 @@ export class CloudBackend implements Backend {
     const { sites } = await readSites();
     let cloudState: { sites?: Record<string, CloudStateEntry>; events?: EventItem[] } = {};
     try {
-      const raw = await gh<{ content: string }>(
-        `/repos/${DATA_OWNER}/${DATA_REPO}/contents/state.json`,
-      );
-      cloudState = JSON.parse(decodeContent(raw.content));
+      cloudState = JSON.parse(await ghRaw(`/repos/${DATA_OWNER}/${DATA_REPO}/contents/state.json`));
     } catch {
       // state.json not created yet: first check has not run.
     }
