@@ -317,10 +317,15 @@ def canonical_url(raw_url: str, base_url: str = "") -> str:
 def is_page_url(url: str) -> bool:
     """Avoid adding downloads and static assets to a website monitor."""
     path = urlparse(url).path.lower()
+    # WordPress and similar sites commonly expose /feed/ as a navigation link,
+    # but it is RSS/XML rather than a viewable HTML page.
+    if path.rstrip("/").endswith("/feed"):
+        return False
     return not path.endswith((
         ".7z", ".avi", ".css", ".csv", ".doc", ".docx", ".gif", ".gz",
         ".ico", ".jpeg", ".jpg", ".js", ".mov", ".mp3", ".mp4", ".pdf",
-        ".png", ".ppt", ".pptx", ".svg", ".tar", ".webp", ".xls", ".xlsx", ".zip",
+        ".png", ".ppt", ".pptx", ".rss", ".svg", ".tar", ".tif", ".tiff",
+        ".webp", ".xls", ".xlsx", ".xml", ".zip",
     ))
 
 
@@ -356,7 +361,12 @@ def extract_internal_links(html_text: str, base_url: str) -> List[str]:
 
 
 def discover_internal_urls(root_url: str) -> List[str]:
-    """Crawl a small, same-origin navigation tree when a site is first added."""
+    """Find a small set of same-origin HTML pages for a newly added site.
+
+    A link alone is not enough to become a monitor target: navigation often
+    includes feeds, downloads, stale links, and other non-HTML resources.
+    Candidates therefore have to be fetched successfully as HTML first.
+    """
     root = canonical_url(root_url)
     found: List[str] = [root]
     queue: List[Tuple[str, int]] = [(root, 0)]
@@ -370,14 +380,17 @@ def discover_internal_urls(root_url: str) -> List[str]:
             html_text, headers = fetch_site({"url": current, "etag": "", "last_modified": ""})
         except Exception:
             continue
-        if depth >= DISCOVERY_DEPTH or "html" not in headers.get("content_type", "").lower():
+        if "html" not in headers.get("content_type", "").lower():
+            continue
+        if current != root:
+            found.append(current)
+            if len(found) >= MAX_DISCOVERED_PAGES:
+                break
+        if depth >= DISCOVERY_DEPTH:
             continue
         for link in extract_internal_links(html_text, current):
-            if link not in found:
-                found.append(link)
+            if link not in visited and not any(queued == link for queued, _ in queue):
                 queue.append((link, depth + 1))
-                if len(found) >= MAX_DISCOVERED_PAGES:
-                    break
     return found
 
 
@@ -614,9 +627,10 @@ def check_site(site_id: int) -> Dict[str, Any]:
             states = page_states(site)
             urls = site_urls(site)
             # A database created by an older PageWatch release has no URL list.
-            # Discover it on the next check so it gains the new behavior too.
+            # Preserve its original single-page scope; only newly added sites
+            # are expanded automatically by initialize_new_site().
             if site["urls_json"] is None:
-                urls = discover_internal_urls(site["url"])
+                urls = [canonical_url(site["url"])]
                 with db_connect() as db:
                     db.execute("UPDATE sites SET urls_json = ? WHERE id = ?", (json.dumps(urls), site_id))
             outcomes: List[str] = []

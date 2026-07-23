@@ -201,13 +201,16 @@ def main() -> int:
             continue
         if not site.get("enabled", True) and not args.only:
             continue
-        if site.pop("auto_discover", False) or not site.get("urls"):
-            # The initial Action can safely fetch the public site; discovered
-            # URLs are then persisted in sites.json alongside the site group.
+        if site.pop("auto_discover", False):
+            # Only a newly added site is expanded automatically.  Existing
+            # single-page records must keep their original scope instead of
+            # unexpectedly starting to monitor every navigation link.
             try:
                 site["urls"] = server.discover_internal_urls(site["url"])
             except Exception:
                 site["urls"] = [site["url"]]
+        elif not site.get("urls"):
+            site["urls"] = [site["url"]]
         results.append((site.get("name") or site["url"], check_one(site, entry, state, mail)))
 
     state["last_run"] = now_iso()

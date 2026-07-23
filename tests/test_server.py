@@ -16,6 +16,38 @@ class VisibleContentTests(unittest.TestCase):
         )
         self.assertEqual(links, ["https://example.com/whats-new/", "https://example.com/research-2/"])
 
+    def test_skips_feed_and_tiff_links(self):
+        links = server.extract_internal_links(
+            '<a href="/whats-new/">News</a><a href="/feed/">Feed</a>'
+            '<a href="/figure.tif">Figure</a>',
+            "https://example.com/",
+        )
+        self.assertEqual(links, ["https://example.com/whats-new/"])
+
+    def test_discovery_only_keeps_successful_html_pages(self):
+        original_fetch = server.fetch_site
+        pages = {
+            "https://example.com/": (
+                '<a href="/good/">Good</a><a href="/missing/">Missing</a><a href="/feed/">Feed</a>',
+                {"content_type": "text/html"},
+            ),
+            "https://example.com/good/": ("<p>Good</p>", {"content_type": "text/html"}),
+            "https://example.com/missing/": ("", {"content_type": "text/html"}),
+            "https://example.com/feed/": ("<rss />", {"content_type": "application/rss+xml"}),
+        }
+        try:
+            def fake_fetch(page):
+                if page["url"].endswith("missing/"):
+                    raise RuntimeError("HTTP 404")
+                return pages[page["url"]]
+            server.fetch_site = fake_fetch
+            self.assertEqual(
+                server.discover_internal_urls("https://example.com/"),
+                ["https://example.com/", "https://example.com/good/"],
+            )
+        finally:
+            server.fetch_site = original_fetch
+
     def test_ignores_scripts_styles_and_hidden_content(self):
         source = """
         <html><head><title>Hidden title</title><style>.x{}</style></head>
